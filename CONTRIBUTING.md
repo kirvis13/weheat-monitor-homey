@@ -27,8 +27,8 @@ Thanks for helping. A few rules keep this public repository tidy.
 bun run test/script.test.ts
 ```
 
-The test runs the real script the way HomeyScript does (no `AbortController`, settings in
-`args[0]`), against a fake Homey and a fake server. Keep the script one file without imports: users
+The test runs the real script (and `controle.js`) the way HomeyScript does (no `AbortController`, settings in
+`args[0]`), against a fake Homey and a fake server. Keep each script one file without imports: users
 paste it as a whole.
 
 ## The API

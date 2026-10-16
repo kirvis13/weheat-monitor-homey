@@ -222,6 +222,39 @@ check("instellingen: alle opties, naam met spatie, hoofdletters in de optie",
   api.leesInstellingen("whm_x;Toon woonkamer;Volg;kamer=Sensor hal;tset=OT Gateway/target_temperature.boiler"));
 check("instellingen: leeg argument", "", api.leesInstellingen(undefined).sleutel);
 
+// ─── 7. Controlescript ──────────────────────────────────────────────────────
+console.log("\n7. Controlescript (controle.js)");
+const controleBron = lees("controle.js");
+check("controle eindigt met de aanroep van controle()", true, controleBron.trimEnd().endsWith("return await controle();"));
+async function controle(sleutel: string, apparaten: Record<string, unknown>, fe: unknown, g: unknown = glob) {
+  const code = controleBron.replace('const SLEUTEL = "whm_...";', `const SLEUTEL = ${JSON.stringify(sleutel)};`)
+    .replace("const TIMEOUT_MS = 10_000;", "const TIMEOUT_MS = 200;");
+  const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
+  const f = new AsyncFunction("Homey", "fetch", "global", "AbortController", code);
+  return f({ devices: { getDevices: async () => apparaten } }, fe, g, undefined) as Promise<string>;
+}
+antwoord = { status: 200, data: { plan_live: false, base_setpoint: 20, blocks: [] } };
+const voorControle = verzonden.length;
+const goedUit = await controle(SLEUTEL, { t1: thermostaat }, fetchNep);
+check("alles goed: argumentregel met de thermostaatnaam", true, goedUit.includes("<je sleutel>;Woonkamer") && goedUit.includes("Alles in orde"));
+check("controle stuurt geen metingen", [], verzonden.slice(voorControle).flatMap((v) => v.body.measurements ?? []));
+check("sleutel staat nooit in de uitvoer", false, goedUit.includes(SLEUTEL));
+check("controle laat niets achter in de opslag", undefined, opslag.get("weheat_monitor_controle") ?? undefined);
+antwoord = { status: 401, data: { error: "unknown key" } };
+const geweigerd = await controle(SLEUTEL, { t1: thermostaat }, fetchNep);
+check("401: sleutel geweigerd, geen 'alles in orde'", [true, false], [geweigerd.includes("Sleutel geweigerd"), geweigerd.includes("Alles in orde")]);
+const voorLeegSleutel = verzonden.length;
+const leegSleutel = await controle("whm_...", { t1: thermostaat }, fetchNep);
+check("niet ingevuld: vraagt om de sleutel, roept de site niet aan", [true, voorLeegSleutel],
+  [leegSleutel.includes("vul bovenin je sleutel in"), verzonden.length]);
+antwoord = { status: 200, data: { plan_live: true, base_setpoint: 20, blocks: [] } };
+const geenThermostaat = await controle(SLEUTEL, { l1: { name: "Lamp", capabilitiesObj: { onoff: { value: true } } } }, fetchNep);
+check("geen thermostaat: FOUT-regel", true, geenThermostaat.includes("Geen thermostaat gevonden"));
+const twee = await controle(SLEUTEL, { t1: thermostaat, t2: { ...thermostaat, id: "t2", name: "Werkkamer" } }, fetchNep);
+check("twee thermostaten: beide genoemd, geen gok in het argument", [true, true, true],
+  [twee.includes('"Woonkamer"'), twee.includes('"Werkkamer"'), twee.includes("<je sleutel>;naam van je thermostaat")]);
+check("plan aan wordt gemeld", true, twee.includes("Plan voor deze koppeling: aan"));
+
 Date.now = echteNu;
 console.log(fouten ? `\n${fouten} fout(en)` : "\nAlles groen");
 process.exit(fouten ? 1 : 0);
