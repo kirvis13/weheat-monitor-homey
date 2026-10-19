@@ -30,27 +30,32 @@ Een HomeyScript dat je thermostaat in Homey koppelt aan [weheat-monitor.nl](http
    const KAMERSENSOR = "";      // optioneel: een losse thermometer die de kamer beter meet
    const VOLG_PLAN = false;     // true: de thermostaat volgt het plan van de site
    ```
-   Druk op **Test**. Weet je een naam nog niet, laat hem dan leeg: de uitvoer noemt alle thermostaten en thermometers in Homey. Kopieer de juiste naam, vul hem in en druk opnieuw op Test. Als alles klopt, zie je zoiets als:
+   Druk op **Test**. Weet je een naam nog niet, laat hem dan leeg: de uitvoer noemt alle thermostaten en thermometers in Homey. Kopieer de juiste naam, vul hem in en druk opnieuw op Test. Als alles klopt, zie je onder de knop zoiets als:
    ```
-   OK    Sleutel geaccepteerd door weheat-monitor.nl. Plan voor deze koppeling: uit.
-   OK    Thermostaat "Toon" (nl.toonwater.toonwater): setpoint 17 °C, kamer 22.3 °C.
-   OK    Kamersensor "Woonkamer sensor": 21.8 °C.
-   OK    HomeyScript kan de toestand bewaren.
+   Weheat Monitor: controle
+
+   ✅ Sleutel geaccepteerd door weheat-monitor.nl. Plan voor deze koppeling: uit.
+   ✅ Thermostaat "Toon" (nl.toonwater.toonwater): setpoint 17 °C, kamer 18.6 °C.
+   ✅ Kamersensor "Woonkamer": 21.8 °C.
+   ✅ HomeyScript kan de toestand bewaren.
 
    Thermostaten in Homey (voor THERMOSTAAT):
-         "Toon": setpoint 17 °C
-         "Werkkamer": setpoint 19 °C
+     • "Toon": setpoint 17 °C
+     • "Werkkamer": setpoint 19 °C
+
    Thermometers in Homey (voor KAMERSENSOR, optioneel):
-         "Sensor hal": 19.4 °C
-         "Woonkamer sensor": 21.8 °C
+     • "Sensor hal": 19.4 °C
+     • "Woonkamer": 21.8 °C
 
    Alles in orde. Zo bouw je de flow:
-     Als       Datum en tijd: Elke 1 minuut
-     Dan       HomeyScript: Voer een script uit met argument
-     Script    weheat-monitor
-     Argument  whm_0123...;Toon;kamer=Woonkamer sensor
+     • Als: Datum en tijd, Elke 1 minuut
+     • Dan: HomeyScript, Voer een script uit met argument
+     • Script: weheat-monitor
+     • Argument: kopieer de regel hieronder
+
+   whm_0123...;Toon;kamer=Woonkamer
    ```
-   Staat er een `FOUT`, dan zegt die regel wat er mis is, en komt het flowblok pas als alles goed is. Het controlescript verandert niets aan je thermostaat. Bewaar het: draai het opnieuw als je later een andere thermostaat of thermometer wilt.
+   Staat er een ❌, dan zegt die regel wat er mis is; het flowblok komt pas als alles goed is. Staat er bij een naam "naam staat dubbel in Homey", geef dat apparaat in Homey dan eerst een eigen naam, anders weet het script niet welke je bedoelt. Het controlescript verandert niets aan je thermostaat. Bewaar het: draai het opnieuw als je later een andere thermostaat of thermometer wilt.
 3. **Script plakken.** Maak een tweede script met de naam `weheat-monitor` en plak de hele inhoud van [`weheat-monitor.js`](weheat-monitor.js) erin. Je hoeft er niets in aan te passen: je sleutel en thermostaat komen in de flow. Sla het op, maar druk hier **niet** op Test. Zonder argument meldt het script `Geen geldige sleutel`; dat is in deze stap normaal.
 4. **Flow maken.** Neem het flowblok uit stap 2 over:
    - **Als**: Datum en tijd, elke 1 minuut.

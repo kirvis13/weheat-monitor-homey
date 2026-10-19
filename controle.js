@@ -45,9 +45,12 @@ async function vraag() {
 
 
 async function controle() {
-  const regels = [];
-  const goed = (t) => regels.push(`OK    ${t}`);
-  const fout = (t) => regels.push(`FOUT  ${t}`);
+  // HomeyScript toont een teruggegeven tekst als één regel met \n erin; wat met
+  // log() gaat, staat er netjes onder elkaar. Dus: alles loggen, kort teruggeven.
+  const schrijf = typeof log === "function" ? log : console.log;
+  const regels = ["Weheat Monitor: controle", ""];
+  const goed = (t) => regels.push(`✅ ${t}`);
+  const fout = (t) => regels.push(`❌ ${t}`);
   let alles = true;
   const graden = (v) => (typeof v === "number" ? `${v} °C` : "onbekend");
 
@@ -73,6 +76,8 @@ async function controle() {
   const apparaten = Object.values(await Homey.devices.getDevices());
   const opNaam = (a, b) => String(a.name).localeCompare(String(b.name));
   const thermostaten = apparaten.filter((d) => d.capabilitiesObj?.target_temperature).sort(opNaam);
+  const keer = (naam) => apparaten.filter((d) => d.name === naam).length;
+  const dubbel = (naam) => `De naam "${naam}" staat ${keer(naam)} keer in Homey. Geef het juiste apparaat in Homey een eigen naam en vul die in.`;
   const sensoren = apparaten
     .filter((d) => d.capabilitiesObj?.measure_temperature && !d.capabilitiesObj?.target_temperature)
     .sort(opNaam);
@@ -83,6 +88,7 @@ async function controle() {
   if (gevraagd) {
     thermostaat = apparaten.find((d) => d.name === gevraagd) ?? null;
     if (!thermostaat) fout(`Thermostaat "${gevraagd}" niet gevonden. Neem de naam precies over uit de lijst hieronder.`);
+    else if (keer(gevraagd) > 1) { fout(dubbel(gevraagd)); thermostaat = null; }
     else if (!thermostaat.capabilitiesObj?.target_temperature) {
       fout(`"${gevraagd}" heeft geen ingestelde temperatuur (target_temperature), dus is geen thermostaat. Kies er een uit de lijst hieronder.`);
       thermostaat = null;
@@ -108,9 +114,10 @@ async function controle() {
     const d = apparaten.find((x) => x.name === kamer);
     const t = d?.capabilitiesObj?.measure_temperature?.value;
     if (!d) fout(`Kamersensor "${kamer}" niet gevonden. Neem de naam precies over uit de lijst hieronder.`);
+    else if (keer(kamer) > 1) fout(dubbel(kamer));
     else if (typeof t !== "number") fout(`Kamersensor "${kamer}" geeft (nog) geen temperatuur.`);
     else goed(`Kamersensor "${kamer}": ${graden(t)}.`);
-    if (!d || typeof t !== "number") alles = false;
+    if (!d || keer(kamer) > 1 || typeof t !== "number") alles = false;
   }
 
   // 5. Bewaren tussen twee runs
@@ -126,31 +133,36 @@ async function controle() {
   }
 
   // 6. Alle namen, om uit te kopiëren
+  const lijst = (d, wat) => `  • "${d.name}": ${wat}${keer(d.name) > 1 ? "  ⚠️ naam staat dubbel in Homey" : ""}`;
   regels.push("", "Thermostaten in Homey (voor THERMOSTAAT):");
-  for (const d of thermostaten) regels.push(`      "${d.name}": setpoint ${graden(d.capabilitiesObj.target_temperature?.value)}`);
-  if (!thermostaten.length) regels.push("      (geen)");
-  regels.push("Thermometers in Homey (voor KAMERSENSOR, optioneel):");
-  for (const d of sensoren) regels.push(`      "${d.name}": ${graden(d.capabilitiesObj.measure_temperature?.value)}`);
-  if (!sensoren.length) regels.push("      (geen)");
+  for (const d of thermostaten) regels.push(lijst(d, `setpoint ${graden(d.capabilitiesObj.target_temperature?.value)}`));
+  if (!thermostaten.length) regels.push("  (geen)");
+  regels.push("", "Thermometers in Homey (voor KAMERSENSOR, optioneel):");
+  for (const d of sensoren) regels.push(lijst(d, graden(d.capabilitiesObj.measure_temperature?.value)));
+  if (!sensoren.length) regels.push("  (geen)");
 
   // 7. De flow
   regels.push("");
   if (!alles) {
-    regels.push("Los eerst de FOUT-regels op en druk opnieuw op Test. Dan staat hier wat je in de flow invult.");
-    return regels.join("\n");
+    regels.push("Los eerst de regels met ❌ op en druk opnieuw op Test. Dan staat hier wat je in de flow invult.");
+    schrijf(regels.join("\n"));
+    return "Nog niet in orde: zie de ❌-regels hierboven.";
   }
   const argument = [sleutel, thermostaat.name, ...(VOLG_PLAN ? ["volg"] : []), ...(kamer ? [`kamer=${kamer}`] : [])].join(";");
   regels.push(
     "Alles in orde. Zo bouw je de flow:",
-    "  Als       Datum en tijd: Elke 1 minuut",
-    "  Dan       HomeyScript: Voer een script uit met argument",
-    "  Script    weheat-monitor",
-    `  Argument  ${argument}`,
+    "  • Als: Datum en tijd, Elke 1 minuut",
+    "  • Dan: HomeyScript, Voer een script uit met argument",
+    "  • Script: weheat-monitor",
+    "  • Argument: kopieer de regel hieronder",
+    "",
+    argument,
     "",
     `Plan volgen: ${VOLG_PLAN ? "aan (volg)" : "uit. Zet VOLG_PLAN op true als de site je thermostaat mag sturen"}.`,
     "Let op: het argument bevat je sleutel. Deel de uitvoer niet zonder die regel weg te halen.",
   );
-  return regels.join("\n");
+  schrijf(regels.join("\n"));
+  return "Alles in orde: neem het flowblok hierboven over.";
 }
 
 return await controle();

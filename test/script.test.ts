@@ -227,6 +227,8 @@ console.log("\n7. Controlescript (controle.js)");
 const controleBron = lees("controle.js");
 check("controle eindigt met de aanroep van controle()", true, controleBron.trimEnd().endsWith("return await controle();"));
 type Keuzes = { thermostaat?: string; kamer?: string; volg?: boolean };
+let controleTerug = "";
+/** Draait controle.js en geeft wat het logt; wat het teruggeeft staat in controleTerug. */
 async function controle(sleutel: string, apparaten: Record<string, unknown>, fe: unknown, k: Keuzes = {}, g: unknown = glob) {
   const code = controleBron.replace('const SLEUTEL = "whm_...";', `const SLEUTEL = ${JSON.stringify(sleutel)};`)
     .replace('const THERMOSTAAT = "";', `const THERMOSTAAT = ${JSON.stringify(k.thermostaat ?? "")};`)
@@ -234,10 +236,12 @@ async function controle(sleutel: string, apparaten: Record<string, unknown>, fe:
     .replace("const VOLG_PLAN = false;", `const VOLG_PLAN = ${k.volg ?? false};`)
     .replace("const TIMEOUT_MS = 10_000;", "const TIMEOUT_MS = 200;");
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
-  const f = new AsyncFunction("Homey", "fetch", "global", "AbortController", code);
-  return f({ devices: { getDevices: async () => apparaten } }, fe, g, undefined) as Promise<string>;
+  const f = new AsyncFunction("Homey", "fetch", "global", "AbortController", "log", code);
+  const gelogd: string[] = [];
+  controleTerug = await f({ devices: { getDevices: async () => apparaten } }, fe, g, undefined, (x: string) => gelogd.push(x));
+  return gelogd.join("\n");
 }
-const argumentRegel = (uit: string) => /^ {2}Argument {2}(.*)$/m.exec(uit)?.[1] ?? null;
+const argumentRegel = (uit: string) => /Argument: kopieer de regel hieronder\n\n(.*)$/m.exec(uit)?.[1] ?? null;
 for (const naam of ["THERMOSTAAT", "KAMERSENSOR", "VOLG_PLAN"]) {
   check(`controle heeft ${naam} bovenin`, true, new RegExp(`^const ${naam} = `, "m").test(controleBron));
 }
@@ -281,6 +285,12 @@ check("het argument werkt in het script", { sleutel: SLEUTEL, thermostaat: "Woon
   (({ sleutel, thermostaat: t, volg, kamersensor }) => ({ sleutel, thermostaat: t, volg, kamersensor }))(
     (await laad()(Homey, fetchNep, glob, log)).leesInstellingen(argumentRegel(alles))));
 const tikfout = await controle(SLEUTEL, { t1: thermostaat, s1: hal }, fetchNep, { kamer: "sensor hal" });
+check("teruggegeven tekst is één korte regel, zonder sleutel", [false, false],
+  [controleTerug.includes("\n"), controleTerug.includes(SLEUTEL)]);
+const itho = { name: "Itho", capabilitiesObj: { measure_temperature: { value: 16.6 } } };
+const dubbel = await controle(SLEUTEL, { t1: thermostaat, i1: itho, i2: { ...itho } }, fetchNep, { kamer: "Itho" });
+check("dubbele naam: gemarkeerd in de lijst, als keuze een FOUT", [true, true, null],
+  [dubbel.includes("naam staat dubbel"), dubbel.includes('De naam "Itho" staat 2 keer'), argumentRegel(dubbel)]);
 check("kamersensor met tikfout: FOUT, geen flowblok", [true, null], [tikfout.includes('Kamersensor "sensor hal" niet gevonden'), argumentRegel(tikfout)]);
 
 // Het script zelf met kamer=

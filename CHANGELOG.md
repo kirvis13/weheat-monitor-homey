@@ -4,7 +4,7 @@ Versies volgen [Semantic Versioning](https://semver.org). De nieuwste versie sta
 
 ## 0.2.1 (19 oktober 2026)
 
-- `controle.js` heeft bovenin nu ook `THERMOSTAAT`, `KAMERSENSOR` en `VOLG_PLAN`, en noemt alle thermostaten en thermometers in Homey bij naam. Als alles klopt, eindigt het met precies wat je in de flow invult: de kaarten, het script en het argument, met je sleutel erin zodat je het in één keer kunt plakken.
+- `controle.js` heeft bovenin nu ook `THERMOSTAAT`, `KAMERSENSOR` en `VOLG_PLAN`, en noemt alle thermostaten en thermometers in Homey bij naam. Als alles klopt, eindigt het met precies wat je in de flow invult: de kaarten, het script en het argument, met je sleutel erin zodat je het in één keer kunt plakken. De uitvoer staat netjes onder elkaar (✅/❌ per controle) en waarschuwt voor namen die dubbel in Homey staan.
 - Vindt het script de sensor uit `kamer=` niet, of geeft die geen temperatuur, dan staat dat in de testtekst. Het gebruikt dan de kamertemperatuur van de thermostaat, zoals al gebeurde.
 - De installatiestappen in de README in de goede volgorde: eerst controleren, dan het script plakken, dan testen via de flow.
 
