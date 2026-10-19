@@ -1,5 +1,7 @@
 # Changelog
 
+Versies volgen [Semantic Versioning](https://semver.org). De nieuwste versie staat bovenaan.
+
 ## 0.2.0 (16 oktober 2026)
 
 - De instellingen staan nu in het argument van de flow (`whm_...;Toon;volg`), niet meer bovenin het script. Een update is daarmee: het hele script vervangen.

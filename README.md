@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/readme-banner-dark.png">
+  <img alt="Weheat Monitor voor Homey" src="docs/readme-banner.png">
+</picture>
+
 # Weheat Monitor voor Homey
 
 Een HomeyScript dat je thermostaat in Homey koppelt aan [weheat-monitor.nl](https://www.weheat-monitor.nl). Het is de Homey-tegenhanger van de [Home Assistant-integratie](https://github.com/kirvis13/weheat-monitor-ha).
@@ -103,3 +108,25 @@ Zet de flow uit of verwijder hem, trek de koppeling in op weheat-monitor.nl/sett
 ```js
 global.set("weheat_monitor_toestand", null);
 ```
+
+## Privacy
+
+De sleutel gaat alleen mee in de `Authorization: Bearer`-kop, komt nooit in een log of testtekst en staat alleen in je flow. Alleen wat onder "Wat er naar de site gaat" staat verlaat je huis, en alleen naar weheat-monitor.nl. Trek de sleutel in op de site om alles in één keer te stoppen.
+
+## Ontwikkelen
+
+```bash
+bun run test/script.test.ts
+```
+
+De test draait het echte script en `controle.js` zoals HomeyScript dat doet (zonder `AbortController`, instellingen in `args[0]`), tegen een nagebootste Homey en server. Hij dekt de wachtrij, de blokkeuze, de vier-uurregel, de grens van 12 tot 24 °C en dat bij het type thermostaat nooit naam of id meegaat.
+
+Wil je helpen? Zie [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Versies
+
+Zie [CHANGELOG.md](CHANGELOG.md). Releases krijgen een tag `vX.Y.Z`, gelijk aan de versie bovenin `weheat-monitor.js`.
+
+## Licentie
+
+MIT
