@@ -132,7 +132,19 @@ async function controle() {
     alles = false;
   }
 
-  // 6. Alle namen, om uit te kopiëren
+  // 6. De Homey-tijdlijn: daar meldt het script of het verbonden is
+  let tijdlijn = false;
+  for (const id of ["homey:manager:notifications:create_notification", "create_notification"]) {
+    try {
+      await Homey.flow.runFlowCardAction({ uri: "homey:manager:notifications", id, args: { text: "✅ Weheat Monitor: controle gedaan, de tijdlijn werkt." } });
+      tijdlijn = true;
+      break;
+    } catch { /* andere vorm van de Homey-API: volgende proberen */ }
+  }
+  if (tijdlijn) goed("HomeyScript kan in de tijdlijn schrijven: daar zie je straks of het script verbonden is.");
+  else regels.push("⚠️ HomeyScript kan niet in de tijdlijn schrijven. Het script werkt wel, maar meldt dan niets in de tijdlijn.");
+
+  // 7. Alle namen, om uit te kopiëren
   const lijst = (d, wat) => `  • "${d.name}": ${wat}${keer(d.name) > 1 ? "  ⚠️ naam staat dubbel in Homey" : ""}`;
   regels.push("", "Thermostaten in Homey (voor THERMOSTAAT):");
   for (const d of thermostaten) regels.push(lijst(d, `setpoint ${graden(d.capabilitiesObj.target_temperature?.value)}`));
@@ -141,7 +153,7 @@ async function controle() {
   for (const d of sensoren) regels.push(lijst(d, graden(d.capabilitiesObj.measure_temperature?.value)));
   if (!sensoren.length) regels.push("  (geen)");
 
-  // 7. De flow
+  // 8. De flow
   regels.push("");
   if (!alles) {
     regels.push("Los eerst de regels met ❌ op en druk opnieuw op Test. Dan staat hier wat je in de flow invult.");

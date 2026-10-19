@@ -27,7 +27,7 @@ check("script eindigt met de aanroep van hoofd()", true, bron.trimEnd().endsWith
 function laad(opties: { volg?: boolean; argument?: string | null; zonderKlok?: boolean } = {}) {
   const code = bron
     .replace("const TIMEOUT_MS = 10_000;", "const TIMEOUT_MS = 200;")
-    .replace(SLOT, "return { hoofd, handmatigVerzet, kiesBlok, leesInstellingen };");
+    .replace(SLOT, "return { hoofd, handmatigVerzet, kiesBlok, leesInstellingen, meldingen };");
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
   // Zoals in HomeyScript: geen AbortController. Met zonderKlok ook geen setTimeout.
   const f = new AsyncFunction("Homey", "fetch", "global", "log", "args", "AbortController", "setTimeout", "clearTimeout", code);
@@ -53,7 +53,12 @@ const thermostaat = {
   },
 };
 const geschreven: number[] = [];
+const tijdlijn: string[] = [];
 const Homey = {
+  flow: { runFlowCardAction: async ({ id, args }: { id: string; args: { text: string } }) => {
+    if (id !== "homey:manager:notifications:create_notification") throw new Error("onbekende kaart");
+    tijdlijn.push(args.text);
+  } },
   devices: {
     getDevices: async () => ({ t1: thermostaat }),
     setCapabilityValue: async ({ value }: { value: number }) => { geschreven.push(value); },
@@ -196,9 +201,18 @@ const zonder = await (await laad({ zonderKlok: true })(Homey, fetchNep, glob, lo
 check("ook zonder setTimeout loopt het script", [true, 0], [typeof zonder === "string", toestand().wachtrij.length]);
 
 console.log("\n5c. Thermostaat niet gevonden");
-const zoek = await (await laad()({ devices: { getDevices: async () => ({}) } }, fetchNep, glob, log)).hoofd();
-check("verkeerde naam: de terugmelding zegt welke naam", true, zoek.includes('thermostaat "Woonkamer" niet gevonden'));
-check("terugmelding begint met de versie", true, /^v\d+\.\d+\.\d+: /.test(zoek));
+const zonderThermostaat = { flow: Homey.flow, devices: { getDevices: async () => ({}) } };
+const voorZoek = tijdlijn.length;
+let zoek = "";
+try { await (await laad()(zonderThermostaat, fetchNep, glob, log)).hoofd(); } catch (e) { zoek = String(e); }
+check("verkeerde naam: de flowkaart wordt rood en zegt welke naam", true, zoek.includes('thermostaat "Woonkamer" niet gevonden'));
+nu += MIN;
+try { await (await laad()(zonderThermostaat, fetchNep, glob, log)).hoofd(); } catch { /* nog steeds fout */ }
+check("verkeerde naam: één keer in de tijdlijn, niet elke minuut", 1,
+  tijdlijn.slice(voorZoek).filter((t) => t.includes('"Woonkamer" niet gevonden')).length);
+nu += MIN;
+const terug = await run();
+check("terugmelding begint met de versie", true, /^v\d+\.\d+\.\d+: /.test(terug));
 
 console.log("\n5d. Thermostaat nog niet klaar (vlak na een herstart van Homey)");
 opslag.delete("weheat_monitor_toestand");
@@ -238,7 +252,7 @@ async function controle(sleutel: string, apparaten: Record<string, unknown>, fe:
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
   const f = new AsyncFunction("Homey", "fetch", "global", "AbortController", "log", code);
   const gelogd: string[] = [];
-  controleTerug = await f({ devices: { getDevices: async () => apparaten } }, fe, g, undefined, (x: string) => gelogd.push(x));
+  controleTerug = await f({ flow: Homey.flow, devices: { getDevices: async () => apparaten } }, fe, g, undefined, (x: string) => gelogd.push(x));
   return gelogd.join("\n");
 }
 const argumentRegel = (uit: string) => /Argument: kopieer de regel hieronder\n\n(.*)$/m.exec(uit)?.[1] ?? null;
@@ -250,6 +264,8 @@ const voorControle = verzonden.length;
 const goedUit = await controle(SLEUTEL, { t1: thermostaat }, fetchNep);
 check("één thermostaat, niets ingevuld: flowblok met kant-en-klaar argument", [true, `${SLEUTEL};Woonkamer`, true],
   [goedUit.includes("Alles in orde"), argumentRegel(goedUit), goedUit.includes("Voer een script uit met argument")]);
+check("controle zet een regel in de tijdlijn en meldt dat", [true, true],
+  [tijdlijn.at(-1)?.includes("controle gedaan"), goedUit.includes("kan in de tijdlijn schrijven")]);
 check("controle stuurt geen metingen", [], verzonden.slice(voorControle).flatMap((v) => v.body.measurements ?? []));
 check("sleutel alleen in de argumentregel", 1, goedUit.split(SLEUTEL).length - 1);
 check("controle laat niets achter in de opslag", undefined, opslag.get("weheat_monitor_controle") ?? undefined);
@@ -305,6 +321,48 @@ nu += MIN;
 const tekstWeg = await metKamer("Sensor zolder");
 check("kamer= niet gevonden: kamer van de thermostaat, en de testtekst zegt het", [20.1, true],
   [verzonden.at(-1)!.body.measurements.at(-1).room_temp, tekstWeg.includes('kamersensor "Sensor zolder" niet gevonden')]);
+
+// ─── 8. Tijdlijn ────────────────────────────────────────────────────────────
+console.log("\n8. Meldingen in de Homey-tijdlijn");
+{
+  const api = await laad()(Homey, fetchNep, glob, log);
+  const m: Record<string, unknown> = {};
+  const t0 = Date.parse("2026-10-19T08:00:00Z");
+  const ok = { verbonden: true, fout: null, probleem: "", kamer: 18.6, setpoint: 17 };
+  const eerst = api.meldingen(m, t0, ok);
+  check("eerste keer verbonden: één melding met kamer en setpoint", [1, true], [eerst.length, eerst[0]?.includes("verbonden") && eerst[0]?.includes("kamer 18.6 °C")]);
+  check("daarna stil", [], api.meldingen(m, t0 + MIN, ok));
+  const storing = { ...ok, fout: "geen verbinding" };
+  check("storing: eerst een kwartier stil", [[], []], [api.meldingen(m, t0 + 2 * MIN, storing), api.meldingen(m, t0 + 16 * MIN, storing)]);
+  const na = api.meldingen(m, t0 + 17 * MIN, storing);
+  check("storing van een kwartier: één melding met het begin (NL-tijd)", [1, true], [na.length, na[0]?.includes("sinds 10:02")]);
+  check("en niet nog eens", [], api.meldingen(m, t0 + 30 * MIN, storing));
+  const herstel = api.meldingen(m, t0 + 31 * MIN, ok);
+  check("hersteld na een melding: 'weer verbonden'", [1, true], [herstel.length, herstel[0]?.includes("weer verbonden")]);
+  api.meldingen(m, t0 + 32 * MIN, storing);
+  check("korte storing zonder melding: ook geen herstelmelding", [], api.meldingen(m, t0 + 35 * MIN, ok));
+  const sleutel = api.meldingen(m, t0 + 36 * MIN, { ...ok, fout: "sleutel geweigerd" });
+  check("geweigerde sleutel: meteen", [1, true], [sleutel.length, sleutel[0]?.includes("weigert de sleutel")]);
+  const m2: Record<string, unknown> = { verbonden: true };
+  const p1 = api.meldingen(m2, t0, { ...ok, probleem: 'kamersensor "Hal" niet gevonden' });
+  check("instelling klopt niet: één melding, daarna stil, na herstel weer klaar", [1, [], []],
+    [p1.length, api.meldingen(m2, t0 + MIN, { ...ok, probleem: 'kamersensor "Hal" niet gevonden' }), api.meldingen(m2, t0 + 2 * MIN, ok)]);
+
+  // Het hele script: de eerste geslaagde run zet een regel in de tijdlijn
+  opslag.delete("weheat_monitor_toestand");
+  antwoord = { status: 200, data: { stored: 1, plan_live: false, base_setpoint: 20, blocks: [] } };
+  const voor = tijdlijn.length;
+  nu += MIN; await run();
+  nu += MIN; await run();
+  check("script: eerste run in de tijdlijn, de tweede niet", [1, true],
+    [tijdlijn.length - voor, tijdlijn.at(-1)?.startsWith("✅ Weheat Monitor: verbonden")]);
+  check("de sleutel komt nooit in de tijdlijn", false, tijdlijn.some((t) => t.includes(SLEUTEL)));
+  const zonderTijdlijn = { devices: Homey.devices, flow: { runFlowCardAction: async () => { throw new Error("geen toegang"); } } };
+  opslag.delete("weheat_monitor_toestand");
+  nu += MIN;
+  const tekst = await (await laad()(zonderTijdlijn, fetchNep, glob, log)).hoofd();
+  check("tijdlijn faalt: script loopt gewoon door", true, tekst.startsWith("v"));
+}
 
 Date.now = echteNu;
 console.log(fouten ? `\n${fouten} fout(en)` : "\nAlles groen");

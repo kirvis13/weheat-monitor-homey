@@ -60,7 +60,23 @@ Een HomeyScript dat je thermostaat in Homey koppelt aan [weheat-monitor.nl](http
 4. **Flow maken.** Neem het flowblok uit stap 2 over:
    - **Als**: Datum en tijd, elke 1 minuut.
    - **Dan**: HomeyScript, "Voer een script uit met argument". Kies `weheat-monitor` en plak als argument de regel achter `Argument`.
-5. **Testen.** Test nu via de flow, niet in het script: druk in de flow op **Testen**. In de testtekst staat dan iets als `v0.2.1: plan volgen staat uit; wachtrij 0`. Op weheat-monitor.nl/settings/connections loopt "laatst gezien" mee.
+5. **Testen.** Test nu via de flow, niet in het script: druk in de flow op **Testen**. Het script meldt zich in de **tijdlijn** van Homey:
+   ```
+   ✅ Weheat Monitor: verbonden met weheat-monitor.nl (kamer 18.6 °C, setpoint 17 °C). Vanaf nu elke minuut een meting.
+   ```
+   Klopt een naam in het argument niet, dan wordt de HomeyScript-kaart in de flow rood en zegt de foutmelding welke naam. Op weheat-monitor.nl/settings/connections loopt "laatst gezien" mee.
+
+### Wat je in de tijdlijn ziet
+
+Het script schrijft alleen in de tijdlijn als er iets verandert, nooit elke minuut:
+
+| Melding | Wanneer |
+|---|---|
+| ✅ verbonden met weheat-monitor.nl | De eerste keer dat het lukt |
+| ⚠️ niet bereikbaar sinds ... | De site is een kwartier niet bereikbaar. De metingen wachten tot 24 uur |
+| ✅ weer verbonden | Na zo'n storing, als de bewaarde metingen verstuurd zijn |
+| ❌ weigert de sleutel | Meteen, als de sleutel is ingetrokken of niet klopt |
+| ⚠️ thermostaat of kamersensor niet gevonden | Eén keer, als een naam in het argument niet (meer) klopt |
 
 ## Het argument
 
@@ -82,7 +98,7 @@ Het script zoekt apparaten op hun naam in Homey, precies zoals die er staat: hoo
 - **Makkelijkst**: draai [`controle.js`](controle.js) (stap 2) met `THERMOSTAAT` en `KAMERSENSOR` leeg. Het noemt elke thermostaat (alles met een ingestelde temperatuur) en elke losse thermometer bij naam, met wat hij nu meet. Kopieer de naam van daaruit, vul hem in en druk opnieuw op Test.
 - **In de Homey-app**: Apparaten, tik op het apparaat, het tandwiel. Bovenaan staat de naam. Daar kun je hem ook veranderen in iets korts zonder rare tekens, bijvoorbeeld `Thermometer woonkamer`. Verander je de naam later, pas dan ook het argument in de flow aan.
 
-Als kamersensor werkt elk apparaat dat een temperatuur meet (`measure_temperature`): een Aqara-, Netatmo- of Shelly-thermometer, een bewegingsmelder met temperatuur, enzovoort. Hang hem waar je echt zit, niet in de zon of bij de radiator. Vindt het script de sensor niet, of geeft hij geen temperatuur, dan gebruikt het de kamertemperatuur van de thermostaat en zegt dat in de testtekst.
+Als kamersensor werkt elk apparaat dat een temperatuur meet (`measure_temperature`): een Aqara-, Netatmo- of Shelly-thermometer, een bewegingsmelder met temperatuur, enzovoort. Hang hem waar je echt zit, niet in de zon of bij de radiator. Vindt het script de sensor niet, of geeft hij geen temperatuur, dan gebruikt het de kamertemperatuur van de thermostaat en zegt dat één keer in de tijdlijn.
 
 **Welke capability heeft mijn OTGW?** Draai dit in een los HomeyScript, met de naam van je gateway:
 
@@ -110,26 +126,27 @@ Met `volg` in het argument mag de site het setpoint van je thermostaat zetten. H
 | Gevraagde aanvoertemperatuur | Alleen met `tset=` | Elke minuut |
 | Type thermostaat | De Homey-app en de driver, stap, minimum en maximum. Geen naam, geen id | Bij de start, na een wijziging en eens per dag |
 
-De sleutel gaat alleen mee in de `Authorization`-kop en komt nooit in een log of in de testtekst.
+De sleutel gaat alleen mee in de `Authorization`-kop en komt nooit in een log, een foutmelding of de tijdlijn.
 
 ## Updaten
 
-Vervang de hele inhoud van het script door de nieuwe [`weheat-monitor.js`](weheat-monitor.js). Je instellingen staan in de flow, dus die blijven staan. Welke versie je hebt, staat vooraan in de testtekst. Wat er per versie veranderde: [`CHANGELOG.md`](CHANGELOG.md).
+Vervang de hele inhoud van het script door de nieuwe [`weheat-monitor.js`](weheat-monitor.js). Je instellingen staan in de flow, dus die blijven staan. Welke versie je hebt, staat bovenin het script (`const VERSIE`). Wat er per versie veranderde: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Als het niet werkt
 
-Draai eerst [`controle.js`](controle.js) (stap 2 hierboven): dat controleert sleutel, thermostaat en opslag in één keer. Daarnaast zegt de testtekst van het script zelf wat er aan de hand is:
+Draai eerst [`controle.js`](controle.js) (stap 2 hierboven): dat controleert sleutel, thermostaat, opslag en tijdlijn in één keer. Daarnaast zeggen de tijdlijn en een rode HomeyScript-kaart in de flow wat er aan de hand is:
 
 | Je ziet | Wat je doet |
 |---|---|
 | `Geen geldige sleutel` | Het script draait zonder argument (bijvoorbeeld met Test in HomeyScript zelf), of de sleutel klopt niet. Test via de flow met argument, en kijk of de hele sleutel erin staat |
 | `thermostaat "..." niet gevonden` | De naam in het argument wijkt af van de naam in Homey. Let op spaties en hoofdletters |
 | `kamersensor "..." niet gevonden` | De naam na `kamer=` wijkt af van de naam in Homey. Het script gebruikt zolang de kamertemperatuur van de thermostaat |
-| `"..." heeft geen target_temperature` | Dat apparaat is geen thermostaat, of de app geeft de ingestelde temperatuur (nog) niet door |
-| `fout: HTTP 401` of `weigert de sleutel` | De sleutel is ingetrokken of verkeerd. Maak een nieuwe koppeling |
-| `fout: geen verbinding` | Even geen internet of de site was niet bereikbaar. De metingen wachten en gaan later mee |
+| `"..." heeft geen ingestelde temperatuur` | Dat apparaat is geen thermostaat, of de app geeft de ingestelde temperatuur (nog) niet door |
+| `weigert de sleutel` | De sleutel is ingetrokken of verkeerd. Maak een nieuwe koppeling |
+| `niet bereikbaar sinds ...` | Geen internet, of de site was niet bereikbaar. De metingen wachten en gaan later mee; je krijgt "weer verbonden" als het weer lukt |
+| Niets in de tijdlijn, kaart niet rood | Kijk of de flow aan staat. Meldde `controle.js` dat HomeyScript niet in de tijdlijn kan schrijven, dan werkt het script wel, maar zonder meldingen. Kijk dan op weheat-monitor.nl/settings/connections bij "laatst gezien" |
 
-Kom je er niet uit, open dan een [issue](https://github.com/kirvis13/weheat-monitor-homey/issues) en zet de testtekst of de uitvoer van `controle.js` erbij. In de testtekst staat nooit je sleutel; haal bij de uitvoer van `controle.js` de regel `Argument` weg, want daar staat hij wel in.
+Kom je er niet uit, open dan een [issue](https://github.com/kirvis13/weheat-monitor-homey/issues) en zet de melding uit de tijdlijn of de uitvoer van `controle.js` erbij. In de tijdlijn staat nooit je sleutel; haal bij de uitvoer van `controle.js` de regel `Argument` weg, want daar staat hij wel in.
 
 ## Verwijderen
 
@@ -141,7 +158,7 @@ global.set("weheat_monitor_toestand", null);
 
 ## Privacy
 
-De sleutel gaat alleen mee in de `Authorization: Bearer`-kop, komt nooit in een log of testtekst en staat alleen in je flow en in het controlescript. Alleen wat onder "Wat er naar de site gaat" staat verlaat je huis, en alleen naar weheat-monitor.nl. Trek de sleutel in op de site om alles in één keer te stoppen.
+De sleutel gaat alleen mee in de `Authorization: Bearer`-kop, komt nooit in een log, foutmelding of de tijdlijn en staat alleen in je flow en in het controlescript. Alleen wat onder "Wat er naar de site gaat" staat verlaat je huis, en alleen naar weheat-monitor.nl. Trek de sleutel in op de site om alles in één keer te stoppen.
 
 ## Ontwikkelen
 

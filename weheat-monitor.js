@@ -21,7 +21,7 @@
 // Het script praat alleen met weheat-monitor.nl, nooit met Weheat zelf. De
 // sleutel gaat alleen in de Authorization-kop mee en komt nooit in het log.
 
-const VERSIE = "0.2.1";
+const VERSIE = "0.3.0";
 
 // ─── Vaste waarden (gelijk aan de Home Assistant-integratie) ────────────────
 
@@ -40,6 +40,7 @@ const PAUZE_MS = 4 * 3600_000;        // de mens wint: vier uur niet sturen
 const THERMOSTAAT_MELDEN_MS = 24 * 3600_000;
 const MAX_WACHT_MS = 15 * 60_000;     // na een fout: 1, 2, 4, 8, dan elk kwartier
 const OPSLAG = "weheat_monitor_toestand";
+const STORING_MELDEN_MS = 15 * 60_000; // pas na een kwartier storing een melding in de tijdlijn
 
 // ─── Regels (puur, getoetst door test/script.test.ts) ──────────────────────
 
@@ -245,7 +246,48 @@ async function minuut(s, nu, { velden, thermo, post, zet, volg }) {
   return s.besluit;
 }
 
+/**
+ * Wat er in de Homey-tijdlijn moet, alleen bij een verandering: de eerste keer
+ * verbonden, een storing die een kwartier duurt (een geweigerde sleutel meteen),
+ * weer verbonden na zo'n melding, en een instelling die niet klopt. Werkt de
+ * toestand bij en geeft de teksten terug.
+ */
+function meldingen(m, nu, { verbonden, fout, probleem, kamer, setpoint }) {
+  const uit = [];
+  if (fout) {
+    m.fout_sinds ??= nu;
+    if (!m.fout_gemeld && (fout === "sleutel geweigerd" || nu - m.fout_sinds >= STORING_MELDEN_MS)) {
+      uit.push(fout === "sleutel geweigerd"
+        ? "❌ Weheat Monitor: weheat-monitor.nl weigert de sleutel. Maak een nieuwe koppeling en zet de sleutel in de flow."
+        : `⚠️ Weheat Monitor: weheat-monitor.nl niet bereikbaar sinds ${new Date(m.fout_sinds).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Amsterdam" })} (${fout}). De metingen wachten tot 24 uur.`);
+      m.fout_gemeld = true;
+    }
+  } else if (verbonden) {
+    const waarden = [kamer !== null ? `kamer ${kamer} °C` : null, setpoint !== null ? `setpoint ${setpoint} °C` : null].filter(Boolean).join(", ");
+    if (!m.verbonden) uit.push(`✅ Weheat Monitor: verbonden met weheat-monitor.nl${waarden ? ` (${waarden})` : ""}. Vanaf nu elke minuut een meting.`);
+    else if (m.fout_gemeld) uit.push("✅ Weheat Monitor: weer verbonden. De bewaarde metingen zijn verstuurd.");
+    m.verbonden = true; m.fout_gemeld = false; m.fout_sinds = null;
+  }
+  if ((probleem || null) !== (m.probleem ?? null)) {
+    if (probleem) uit.push(`⚠️ Weheat Monitor: ${probleem}. Draai controle.js om de namen in Homey te zien.`);
+    m.probleem = probleem || null;
+  }
+  return uit;
+}
+
 // ─── Homey ──────────────────────────────────────────────────────────────────
+
+/** Een regel in de Homey-tijdlijn. Lukt dat niet, dan gaat het script gewoon door. */
+async function inTijdlijn(tekst) {
+  for (const id of ["homey:manager:notifications:create_notification", "create_notification"]) {
+    try {
+      await Homey.flow.runFlowCardAction({ uri: "homey:manager:notifications", id, args: { text: tekst } });
+      return true;
+    } catch { /* andere vorm van de Homey-API, of geen tijdlijn: volgende proberen */ }
+  }
+  log(tekst);
+  return false;
+}
 
 /** Een apparaat op naam of id. */
 async function zoekApparaat(naamOfId) {
@@ -344,14 +386,27 @@ async function hoofd() {
   } : null;
   const zet = (doel) => Homey.devices.setCapabilityValue({ deviceId: thermostaat.id, capabilityId: "target_temperature", value: doel });
 
+  let mislukt = null;
   try {
     await minuut(s, nu, { velden, thermo, post: (body) => post(body, ik.sleutel), zet, volg: ik.volg });
-  } finally {
-    global.set(OPSLAG, JSON.stringify(s));
+  } catch (e) {
+    mislukt = e;
   }
+  // Instellingen die niet kloppen: in de tijdlijn, en de flowkaart wordt rood.
+  const instelling = !thermostaat ? `thermostaat "${ik.thermostaat}" niet gevonden in Homey`
+    : !thermostaat.capabilitiesObj?.target_temperature ? `"${ik.thermostaat}" heeft geen ingestelde temperatuur (target_temperature)` : "";
+  s.melding = s.melding && typeof s.melding === "object" ? s.melding : {};
+  const teksten = meldingen(s.melding, nu, {
+    verbonden: s.laatste_sync !== null, fout: s.laatste_fout, probleem: instelling || sensorMist.replace(/, kamer van de thermostaat$/, ""),
+    kamer: velden.room_temp, setpoint: velden.setpoint,
+  });
+  global.set(OPSLAG, JSON.stringify(s));
+  for (const t of teksten) await inTijdlijn(t);
+  if (mislukt) throw mislukt;
+  if (instelling) throw new Error(`${instelling}. Controleer de naam in het argument van de flow (hoofdletters en spaties tellen mee).`);
+
   const blok = kiesBlok(s.blokken, nu);
-  const waarom = !thermostaat ? `thermostaat "${ik.thermostaat}" niet gevonden`
-    : !thermo ? `"${ik.thermostaat}" heeft geen target_temperature` : s.besluit;
+  const waarom = !thermo ? `"${ik.thermostaat}" geeft nog geen setpoint` : s.besluit;
   return `v${VERSIE}: ${waarom}; wachtrij ${s.wachtrij.length}` +
     (sensorMist ? `; ${sensorMist}` : "") +
     (blok ? `; blok ${blok.setpoint} °C tot ${blok.end}` : "") +
