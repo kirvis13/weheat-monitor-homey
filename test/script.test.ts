@@ -226,8 +226,9 @@ check("instellingen: leeg argument", "", api.leesInstellingen(undefined).sleutel
 console.log("\n7. Controlescript (controle.js)");
 const controleBron = lees("controle.js");
 check("controle eindigt met de aanroep van controle()", true, controleBron.trimEnd().endsWith("return await controle();"));
-async function controle(sleutel: string, apparaten: Record<string, unknown>, fe: unknown, g: unknown = glob) {
+async function controle(sleutel: string, apparaten: Record<string, unknown>, fe: unknown, g: unknown = glob, kamer = "") {
   const code = controleBron.replace('const SLEUTEL = "whm_...";', `const SLEUTEL = ${JSON.stringify(sleutel)};`)
+    .replace('const KAMERSENSOR = "";', `const KAMERSENSOR = ${JSON.stringify(kamer)};`)
     .replace("const TIMEOUT_MS = 10_000;", "const TIMEOUT_MS = 200;");
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
   const f = new AsyncFunction("Homey", "fetch", "global", "AbortController", code);
@@ -254,6 +255,29 @@ const twee = await controle(SLEUTEL, { t1: thermostaat, t2: { ...thermostaat, id
 check("twee thermostaten: beide genoemd, geen gok in het argument", [true, true, true],
   [twee.includes('"Woonkamer"'), twee.includes('"Werkkamer"'), twee.includes("<je sleutel>;naam van je thermostaat")]);
 check("plan aan wordt gemeld", true, twee.includes("Plan voor deze koppeling: aan"));
+
+const hal = { id: "s1", name: "Sensor hal", capabilitiesObj: { measure_temperature: { value: 19.4 } } };
+const metSensor = await controle(SLEUTEL, { t1: thermostaat, s1: hal }, fetchNep);
+check("losse sensor in de lijst, thermostaat niet, geen kamer= zonder keuze", [true, false, false, true],
+  [metSensor.includes('"Sensor hal": 19.4'), metSensor.includes('"Woonkamer": 20.1'), metSensor.includes(";kamer="), metSensor.includes("KAMERSENSOR")]);
+const gekozen = await controle(SLEUTEL, { t1: thermostaat, s1: hal }, fetchNep, glob, "Sensor hal");
+check("gekozen kamersensor komt in het argument", [true, true], [gekozen.includes("<je sleutel>;Woonkamer;kamer=Sensor hal"), gekozen.includes("Alles in orde")]);
+const tikfout = await controle(SLEUTEL, { t1: thermostaat, s1: hal }, fetchNep, glob, "sensor hal");
+check("kamersensor met tikfout: FOUT, niet in het argument", [true, false, false],
+  [tikfout.includes('Kamersensor "sensor hal" niet gevonden'), tikfout.includes(";kamer="), tikfout.includes("Alles in orde")]);
+
+// Het script zelf met kamer=
+const HomeyMetSensor = { devices: { ...Homey.devices, getDevices: async () => ({ t1: thermostaat, s1: hal }) } };
+const metKamer = (naam: string) => laad({ argument: `${SLEUTEL};Woonkamer;kamer=${naam}` })(HomeyMetSensor, fetchNep, glob, log).then((a: any) => a.hoofd());
+antwoord = { status: 200, data: { stored: 1, plan_live: false, base_setpoint: 20, blocks: [] } };
+nu += MIN;
+const tekstGoed = await metKamer("Sensor hal");
+check("kamer=: kamertemperatuur uit de sensor, geen waarschuwing", [19.4, false],
+  [verzonden.at(-1)!.body.measurements.at(-1).room_temp, tekstGoed.includes("kamersensor")]);
+nu += MIN;
+const tekstWeg = await metKamer("Sensor zolder");
+check("kamer= niet gevonden: kamer van de thermostaat, en de testtekst zegt het", [20.1, true],
+  [verzonden.at(-1)!.body.measurements.at(-1).room_temp, tekstWeg.includes('kamersensor "Sensor zolder" niet gevonden')]);
 
 Date.now = echteNu;
 console.log(fouten ? `\n${fouten} fout(en)` : "\nAlles groen");

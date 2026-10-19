@@ -21,7 +21,7 @@
 // Het script praat alleen met weheat-monitor.nl, nooit met Weheat zelf. De
 // sleutel gaat alleen in de Authorization-kop mee en komt nooit in het log.
 
-const VERSIE = "0.2.0";
+const VERSIE = "0.2.1";
 
 // ─── Vaste waarden (gelijk aan de Home Assistant-integratie) ────────────────
 
@@ -328,6 +328,9 @@ async function hoofd() {
   const kamersensor = await zoekApparaat(ik.kamersensor);
   const tset = await zoekApparaat(ik.tsetApparaat);
   if (!thermostaat) log(`Thermostaat "${ik.thermostaat}" niet gevonden; alleen de wachtrij wordt verstuurd.`);
+  // Een kamersensor die niet (meer) bestaat of geen temperatuur geeft: terug naar de thermostaat, en zeggen.
+  const sensorMist = ik.kamersensor && waarde(kamersensor, "measure_temperature") === null
+    ? `kamersensor "${ik.kamersensor}" ${kamersensor ? "geeft geen temperatuur" : "niet gevonden"}, kamer van de thermostaat` : "";
 
   const velden = {
     room_temp: waarde(kamersensor, "measure_temperature") ?? waarde(thermostaat, "measure_temperature"),
@@ -350,6 +353,7 @@ async function hoofd() {
   const waarom = !thermostaat ? `thermostaat "${ik.thermostaat}" niet gevonden`
     : !thermo ? `"${ik.thermostaat}" heeft geen target_temperature` : s.besluit;
   return `v${VERSIE}: ${waarom}; wachtrij ${s.wachtrij.length}` +
+    (sensorMist ? `; ${sensorMist}` : "") +
     (blok ? `; blok ${blok.setpoint} °C tot ${blok.end}` : "") +
     (s.laatste_fout ? `; fout: ${s.laatste_fout}` : "");
 }

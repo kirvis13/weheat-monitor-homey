@@ -23,14 +23,20 @@ Een HomeyScript dat je thermostaat in Homey koppelt aan [weheat-monitor.nl](http
 ## Installeren
 
 1. **Sleutel maken.** Ga naar [weheat-monitor.nl/settings/connections](https://www.weheat-monitor.nl/settings/connections), maak een nieuwe koppeling en kopieer de sleutel (`whm_` plus 64 tekens). Je ziet hem maar één keer.
-2. **Eerst controleren.** Open HomeyScript op [my.homey.app](https://my.homey.app), maak een script `weheat-monitor-controle`, plak [`controle.js`](controle.js) erin, zet je sleutel bovenin en druk op **Test**. Je ziet dan zoiets als:
+2. **Eerst controleren.** Open HomeyScript op [my.homey.app](https://my.homey.app), maak een script `weheat-monitor-controle`, plak [`controle.js`](controle.js) erin, zet je sleutel bovenin en druk op **Test**. Wil je een losse thermometer voor de kamer gebruiken, zet dan ook zijn naam bij `KAMERSENSOR` (zie [Hoe heet mijn thermostaat of sensor?](#hoe-heet-mijn-thermostaat-of-sensor)). Je ziet dan zoiets als:
    ```
    OK    Sleutel geaccepteerd door weheat-monitor.nl. Plan voor deze koppeling: uit.
    OK    Thermostaat "Toon" (nl.toonwater.toonwater): setpoint 17 °C, kamer 22.3 °C.
+
+   Temperatuursensoren (voor kamer= in het argument):
+         "Sensor hal": 19.4 °C
+         "Woonkamer sensor": 21.8 °C
+
+   OK    Kamersensor "Woonkamer sensor": 21.8 °C.
    OK    HomeyScript kan de toestand bewaren.
 
    Alles in orde. Zet dit als argument in de flow:
-   <je sleutel>;Toon
+   <je sleutel>;Toon;kamer=Woonkamer sensor
    ```
    Staat er een `FOUT`, dan zegt die regel wat er mis is. Bewaar de regel na "Zet dit als argument in de flow" (met je eigen sleutel ervoor), die heb je in stap 4 nodig. Het controlescript verandert niets aan je thermostaat; daarna mag je het weggooien.
 3. **Script plakken.** Maak een tweede script met de naam `weheat-monitor` en plak de hele inhoud van [`weheat-monitor.js`](weheat-monitor.js) erin. Je hoeft er niets in aan te passen: je sleutel en thermostaat komen in de flow. Sla het op, maar druk hier **niet** op Test. Zonder argument meldt het script `Geen geldige sleutel`; dat is in deze stap normaal.
@@ -40,7 +46,7 @@ Een HomeyScript dat je thermostaat in Homey koppelt aan [weheat-monitor.nl](http
      ```
      whm_0123...;Toon
      ```
-5. **Testen.** Test nu via de flow, niet in het script: druk in de flow op **Testen**. In de testtekst staat dan iets als `v0.2.0: plan volgen staat uit; wachtrij 0`. Op weheat-monitor.nl/settings/connections loopt "laatst gezien" mee.
+5. **Testen.** Test nu via de flow, niet in het script: druk in de flow op **Testen**. In de testtekst staat dan iets als `v0.2.1: plan volgen staat uit; wachtrij 0`. Op weheat-monitor.nl/settings/connections loopt "laatst gezien" mee.
 
 ## Het argument
 
@@ -54,6 +60,15 @@ Het argument is je sleutel en de naam van je thermostaat, met puntkomma's ertuss
 | `whm_...;Toon;tset=OTGW/target_temperature` | De gevraagde aanvoertemperatuur van een OpenTherm Gateway (`apparaat/capability`) |
 
 Opties mogen samen: `whm_...;Toon;volg;kamer=Woonkamer sensor`. Een naam mag spaties bevatten, maar moet precies zo heten als in Homey.
+
+### Hoe heet mijn thermostaat of sensor?
+
+Het script zoekt apparaten op hun naam in Homey, precies zoals die er staat: hoofdletters en spaties tellen mee.
+
+- **Makkelijkst**: draai [`controle.js`](controle.js) (stap 2). Het noemt elke thermostaat (alles met een ingestelde temperatuur) en elke losse temperatuursensor bij naam, met de temperatuur die hij nu meet. Kopieer de naam van daaruit.
+- **In de Homey-app**: Apparaten, tik op het apparaat, het tandwiel. Bovenaan staat de naam. Daar kun je hem ook veranderen in iets korts zonder rare tekens, bijvoorbeeld `Thermometer woonkamer`. Verander je de naam later, pas dan ook het argument in de flow aan.
+
+Als kamersensor werkt elk apparaat dat een temperatuur meet (`measure_temperature`): een Aqara-, Netatmo- of Shelly-thermometer, een bewegingsmelder met temperatuur, enzovoort. Hang hem waar je echt zit, niet in de zon of bij de radiator. Vindt het script de sensor niet, of geeft hij geen temperatuur, dan gebruikt het de kamertemperatuur van de thermostaat en zegt dat in de testtekst.
 
 **Welke capability heeft mijn OTGW?** Draai dit in een los HomeyScript, met de naam van je gateway:
 
@@ -95,6 +110,7 @@ Draai eerst [`controle.js`](controle.js) (stap 2 hierboven): dat controleert sle
 |---|---|
 | `Geen geldige sleutel` | Het script draait zonder argument (bijvoorbeeld met Test in HomeyScript zelf), of de sleutel klopt niet. Test via de flow met argument, en kijk of de hele sleutel erin staat |
 | `thermostaat "..." niet gevonden` | De naam in het argument wijkt af van de naam in Homey. Let op spaties en hoofdletters |
+| `kamersensor "..." niet gevonden` | De naam na `kamer=` wijkt af van de naam in Homey. Het script gebruikt zolang de kamertemperatuur van de thermostaat |
 | `"..." heeft geen target_temperature` | Dat apparaat is geen thermostaat, of de app geeft de ingestelde temperatuur (nog) niet door |
 | `fout: HTTP 401` of `weigert de sleutel` | De sleutel is ingetrokken of verkeerd. Maak een nieuwe koppeling |
 | `fout: geen verbinding` | Even geen internet of de site was niet bereikbaar. De metingen wachten en gaan later mee |

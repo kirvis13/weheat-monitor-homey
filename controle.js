@@ -3,11 +3,12 @@
 //
 // Draai dit één keer in een los HomeyScript, vóór je de flow maakt: vul je
 // sleutel hieronder in en druk op Test. Het controleert je sleutel bij
-// weheat-monitor.nl, zoekt je thermostaten en geeft de regel die je als
-// argument in de flow zet. Het verandert niets aan je thermostaat; de site
+// weheat-monitor.nl, zoekt je thermostaten en temperatuursensoren en geeft de
+// regel die je als argument in de flow zet. Het verandert niets aan je thermostaat; de site
 // ziet alleen dat de koppeling "gezien" is.
 
 const SLEUTEL = "whm_...";            // van weheat-monitor.nl/settings/connections
+const KAMERSENSOR = "";               // optioneel: naam van een losse temperatuursensor, zoals hieronder in de lijst
 
 const ADRES = "https://www.weheat-monitor.nl/api/v1/devices/sync";
 const TIMEOUT_MS = 10_000;
@@ -78,7 +79,28 @@ async function controle() {
     }
   }
 
-  // 3. Bewaren tussen twee runs
+  // 3. Losse temperatuursensoren, voor kamer= in het argument
+  const sensoren = apparaten
+    .filter((d) => d.capabilitiesObj?.measure_temperature && !d.capabilitiesObj?.target_temperature)
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const kamersensor = KAMERSENSOR.trim();
+  if (sensoren.length) {
+    regels.push("");
+    regels.push("Temperatuursensoren (voor kamer= in het argument):");
+    for (const d of sensoren) regels.push(`      "${d.name}": ${d.capabilitiesObj.measure_temperature?.value ?? "onbekend"} °C`);
+    regels.push("");
+  }
+  let kamerOk = false;
+  if (kamersensor) {
+    const d = apparaten.find((x) => x.name === kamersensor);
+    const t = d?.capabilitiesObj?.measure_temperature?.value;
+    if (!d) fout(`Kamersensor "${kamersensor}" niet gevonden. Neem de naam precies over uit de lijst hierboven.`);
+    else if (typeof t !== "number") fout(`Kamersensor "${kamersensor}" geeft (nog) geen temperatuur.`);
+    else { goed(`Kamersensor "${kamersensor}": ${t} °C.`); kamerOk = true; }
+    if (!kamerOk) alles = false;
+  }
+
+  // 4. Bewaren tussen twee runs
   const proef = `controle-${Date.now()}`;
   try {
     global.set("weheat_monitor_controle", proef);
@@ -90,13 +112,14 @@ async function controle() {
     alles = false;
   }
 
-  // 4. De regel voor de flow
+  // 5. De regel voor de flow
   const naam = thermostaten.length === 1 ? thermostaten[0].name : "naam van je thermostaat";
   regels.push("");
   regels.push(alles ? "Alles in orde. Zet dit als argument in de flow:" : "Los eerst de FOUT-regels op. Daarna wordt het argument:");
-  regels.push(`<je sleutel>;${naam}`);
+  regels.push(`<je sleutel>;${naam}${kamerOk ? `;kamer=${kamersensor}` : ""}`);
   regels.push("(Je sleutel staat hier bewust niet in, zodat je deze tekst veilig kunt delen.)");
   if (thermostaten.length > 1) regels.push("(Kies de naam van de thermostaat die je pomp aanstuurt, precies zoals hierboven.)");
+  if (!kamersensor && sensoren.length) regels.push("(Meet een sensor hierboven de kamer beter? Zet zijn naam bovenin bij KAMERSENSOR en druk opnieuw op Test.)");
   return regels.join("\n");
 }
 
