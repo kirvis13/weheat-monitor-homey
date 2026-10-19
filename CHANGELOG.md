@@ -5,6 +5,7 @@ Versies volgen [Semantic Versioning](https://semver.org). De nieuwste versie sta
 ## 0.3.0 (19 oktober 2026)
 
 - Het script meldt zich in de tijdlijn van Homey, alleen als er iets verandert: de eerste keer verbonden, een storing van een kwartier (een geweigerde sleutel meteen), weer verbonden na zo'n storing, en een thermostaat of kamersensor die niet gevonden wordt. Zo zie je na het testen van de flow dat het werkt.
+- Een kamersensor uit `kamer=` die niet gevonden wordt of geen temperatuur geeft, staat nu ook in de tijdlijn in plaats van in de testtekst, die bij een flow niet te zien is.
 - Klopt de naam van de thermostaat niet, dan wordt de HomeyScript-kaart in de flow rood met de naam erbij, in plaats van stil door te lopen.
 - `controle.js` controleert ook of HomeyScript in de tijdlijn kan schrijven.
 
