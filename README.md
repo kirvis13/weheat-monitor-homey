@@ -23,8 +23,7 @@ Een HomeyScript dat je thermostaat in Homey koppelt aan [weheat-monitor.nl](http
 ## Installeren
 
 1. **Sleutel maken.** Ga naar [weheat-monitor.nl/settings/connections](https://www.weheat-monitor.nl/settings/connections), maak een nieuwe koppeling en kopieer de sleutel (`whm_` plus 64 tekens). Je ziet hem maar één keer.
-2. **Script plakken.** Open HomeyScript op [my.homey.app](https://my.homey.app), maak een nieuw script met de naam `weheat-monitor` en plak de hele inhoud van [`weheat-monitor.js`](weheat-monitor.js) erin. Je hoeft er niets in aan te passen.
-3. **Eerst controleren.** Maak een tweede script, `weheat-monitor-controle`, plak [`controle.js`](controle.js) erin, zet je sleutel bovenin en druk op **Test**. Je ziet dan zoiets als:
+2. **Eerst controleren.** Open HomeyScript op [my.homey.app](https://my.homey.app), maak een script `weheat-monitor-controle`, plak [`controle.js`](controle.js) erin, zet je sleutel bovenin en druk op **Test**. Je ziet dan zoiets als:
    ```
    OK    Sleutel geaccepteerd door weheat-monitor.nl. Plan voor deze koppeling: uit.
    OK    Thermostaat "Toon" (nl.toonwater.toonwater): setpoint 17 °C, kamer 22.3 °C.
@@ -33,14 +32,15 @@ Een HomeyScript dat je thermostaat in Homey koppelt aan [weheat-monitor.nl](http
    Alles in orde. Zet dit als argument in de flow:
    <je sleutel>;Toon
    ```
-   Staat er een `FOUT`, dan zegt die regel wat er mis is. Het controlescript verandert niets aan je thermostaat; daarna mag je het weggooien.
+   Staat er een `FOUT`, dan zegt die regel wat er mis is. Bewaar de regel na "Zet dit als argument in de flow" (met je eigen sleutel ervoor), die heb je in stap 4 nodig. Het controlescript verandert niets aan je thermostaat; daarna mag je het weggooien.
+3. **Script plakken.** Maak een tweede script met de naam `weheat-monitor` en plak de hele inhoud van [`weheat-monitor.js`](weheat-monitor.js) erin. Je hoeft er niets in aan te passen: je sleutel en thermostaat komen in de flow. Sla het op, maar druk hier **niet** op Test. Zonder argument meldt het script `Geen geldige sleutel`; dat is in deze stap normaal.
 4. **Flow maken.**
    - **Als**: Datum en tijd, elke 1 minuut.
-   - **Dan**: HomeyScript, het script uitvoeren **met argument**. Kies `weheat-monitor` en zet als argument je sleutel, een puntkomma en de naam van je thermostaat zoals hij in Homey heet:
+   - **Dan**: HomeyScript, het script uitvoeren **met argument**. Kies `weheat-monitor` en zet als argument de regel uit stap 2: je sleutel, een puntkomma en de naam van je thermostaat zoals hij in Homey heet:
      ```
      whm_0123...;Toon
      ```
-5. **Testen.** Druk in de flow op Testen. Na een minuut staat in de testtekst iets als `v0.2.0: plan volgen staat uit; wachtrij 0`. Op weheat-monitor.nl/settings/connections loopt "laatst gezien" mee.
+5. **Testen.** Test nu via de flow, niet in het script: druk in de flow op **Testen**. In de testtekst staat dan iets als `v0.2.0: plan volgen staat uit; wachtrij 0`. Op weheat-monitor.nl/settings/connections loopt "laatst gezien" mee.
 
 ## Het argument
 
@@ -89,11 +89,11 @@ Vervang de hele inhoud van het script door de nieuwe [`weheat-monitor.js`](wehea
 
 ## Als het niet werkt
 
-Draai eerst [`controle.js`](controle.js) (stap 3 hierboven): dat controleert sleutel, thermostaat en opslag in één keer. Daarnaast zegt de testtekst van het script zelf wat er aan de hand is:
+Draai eerst [`controle.js`](controle.js) (stap 2 hierboven): dat controleert sleutel, thermostaat en opslag in één keer. Daarnaast zegt de testtekst van het script zelf wat er aan de hand is:
 
 | Je ziet | Wat je doet |
 |---|---|
-| `Geen geldige sleutel` | Het script draait zonder argument, of de sleutel klopt niet. Start het vanuit de flow met argument, en kijk of de hele sleutel erin staat |
+| `Geen geldige sleutel` | Het script draait zonder argument (bijvoorbeeld met Test in HomeyScript zelf), of de sleutel klopt niet. Test via de flow met argument, en kijk of de hele sleutel erin staat |
 | `thermostaat "..." niet gevonden` | De naam in het argument wijkt af van de naam in Homey. Let op spaties en hoofdletters |
 | `"..." heeft geen target_temperature` | Dat apparaat is geen thermostaat, of de app geeft de ingestelde temperatuur (nog) niet door |
 | `fout: HTTP 401` of `weigert de sleutel` | De sleutel is ingetrokken of verkeerd. Maak een nieuwe koppeling |
