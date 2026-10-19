@@ -226,45 +226,62 @@ check("instellingen: leeg argument", "", api.leesInstellingen(undefined).sleutel
 console.log("\n7. Controlescript (controle.js)");
 const controleBron = lees("controle.js");
 check("controle eindigt met de aanroep van controle()", true, controleBron.trimEnd().endsWith("return await controle();"));
-async function controle(sleutel: string, apparaten: Record<string, unknown>, fe: unknown, g: unknown = glob, kamer = "") {
+type Keuzes = { thermostaat?: string; kamer?: string; volg?: boolean };
+async function controle(sleutel: string, apparaten: Record<string, unknown>, fe: unknown, k: Keuzes = {}, g: unknown = glob) {
   const code = controleBron.replace('const SLEUTEL = "whm_...";', `const SLEUTEL = ${JSON.stringify(sleutel)};`)
-    .replace('const KAMERSENSOR = "";', `const KAMERSENSOR = ${JSON.stringify(kamer)};`)
+    .replace('const THERMOSTAAT = "";', `const THERMOSTAAT = ${JSON.stringify(k.thermostaat ?? "")};`)
+    .replace('const KAMERSENSOR = "";', `const KAMERSENSOR = ${JSON.stringify(k.kamer ?? "")};`)
+    .replace("const VOLG_PLAN = false;", `const VOLG_PLAN = ${k.volg ?? false};`)
     .replace("const TIMEOUT_MS = 10_000;", "const TIMEOUT_MS = 200;");
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
   const f = new AsyncFunction("Homey", "fetch", "global", "AbortController", code);
   return f({ devices: { getDevices: async () => apparaten } }, fe, g, undefined) as Promise<string>;
 }
+const argumentRegel = (uit: string) => /^ {2}Argument {2}(.*)$/m.exec(uit)?.[1] ?? null;
+for (const naam of ["THERMOSTAAT", "KAMERSENSOR", "VOLG_PLAN"]) {
+  check(`controle heeft ${naam} bovenin`, true, new RegExp(`^const ${naam} = `, "m").test(controleBron));
+}
 antwoord = { status: 200, data: { plan_live: false, base_setpoint: 20, blocks: [] } };
 const voorControle = verzonden.length;
 const goedUit = await controle(SLEUTEL, { t1: thermostaat }, fetchNep);
-check("alles goed: argumentregel met de thermostaatnaam", true, goedUit.includes("<je sleutel>;Woonkamer") && goedUit.includes("Alles in orde"));
+check("één thermostaat, niets ingevuld: flowblok met kant-en-klaar argument", [true, `${SLEUTEL};Woonkamer`, true],
+  [goedUit.includes("Alles in orde"), argumentRegel(goedUit), goedUit.includes("Voer een script uit met argument")]);
 check("controle stuurt geen metingen", [], verzonden.slice(voorControle).flatMap((v) => v.body.measurements ?? []));
-check("sleutel staat nooit in de uitvoer", false, goedUit.includes(SLEUTEL));
+check("sleutel alleen in de argumentregel", 1, goedUit.split(SLEUTEL).length - 1);
 check("controle laat niets achter in de opslag", undefined, opslag.get("weheat_monitor_controle") ?? undefined);
 antwoord = { status: 401, data: { error: "unknown key" } };
 const geweigerd = await controle(SLEUTEL, { t1: thermostaat }, fetchNep);
-check("401: sleutel geweigerd, geen 'alles in orde'", [true, false], [geweigerd.includes("Sleutel geweigerd"), geweigerd.includes("Alles in orde")]);
+check("401: sleutel geweigerd, geen flowblok", [true, null], [geweigerd.includes("Sleutel geweigerd"), argumentRegel(geweigerd)]);
 const voorLeegSleutel = verzonden.length;
 const leegSleutel = await controle("whm_...", { t1: thermostaat }, fetchNep);
-check("niet ingevuld: vraagt om de sleutel, roept de site niet aan", [true, voorLeegSleutel],
-  [leegSleutel.includes("vul bovenin je sleutel in"), verzonden.length]);
+check("niet ingevuld: vraagt om de sleutel, roept de site niet aan, geen flowblok", [true, voorLeegSleutel, null],
+  [leegSleutel.includes("vul bovenin je sleutel in"), verzonden.length, argumentRegel(leegSleutel)]);
 antwoord = { status: 200, data: { plan_live: true, base_setpoint: 20, blocks: [] } };
 const geenThermostaat = await controle(SLEUTEL, { l1: { name: "Lamp", capabilitiesObj: { onoff: { value: true } } } }, fetchNep);
 check("geen thermostaat: FOUT-regel", true, geenThermostaat.includes("Geen thermostaat gevonden"));
-const twee = await controle(SLEUTEL, { t1: thermostaat, t2: { ...thermostaat, id: "t2", name: "Werkkamer" } }, fetchNep);
-check("twee thermostaten: beide genoemd, geen gok in het argument", [true, true, true],
-  [twee.includes('"Woonkamer"'), twee.includes('"Werkkamer"'), twee.includes("<je sleutel>;naam van je thermostaat")]);
+const werkkamer = { ...thermostaat, id: "t2", name: "Werkkamer" };
+const twee = await controle(SLEUTEL, { t1: thermostaat, t2: werkkamer }, fetchNep);
+check("twee thermostaten, niets ingevuld: beide genoemd, vraagt om THERMOSTAAT, geen gok", [true, true, true, null],
+  [twee.includes('"Woonkamer"'), twee.includes('"Werkkamer"'), twee.includes("Zet bij THERMOSTAAT"), argumentRegel(twee)]);
 check("plan aan wordt gemeld", true, twee.includes("Plan voor deze koppeling: aan"));
+const gekozenT = await controle(SLEUTEL, { t1: thermostaat, t2: werkkamer }, fetchNep, { thermostaat: "Werkkamer" });
+check("THERMOSTAAT gekozen: die in het argument", `${SLEUTEL};Werkkamer`, argumentRegel(gekozenT));
+const tikT = await controle(SLEUTEL, { t1: thermostaat }, fetchNep, { thermostaat: "woonkamer" });
+check("THERMOSTAAT met tikfout: FOUT, geen flowblok", [true, null], [tikT.includes('Thermostaat "woonkamer" niet gevonden'), argumentRegel(tikT)]);
 
 const hal = { id: "s1", name: "Sensor hal", capabilitiesObj: { measure_temperature: { value: 19.4 } } };
+const geenThermo = await controle(SLEUTEL, { t1: thermostaat, s1: hal }, fetchNep, { thermostaat: "Sensor hal" });
+check("een thermometer als THERMOSTAAT: FOUT", true, geenThermo.includes('"Sensor hal" heeft geen ingestelde temperatuur'));
 const metSensor = await controle(SLEUTEL, { t1: thermostaat, s1: hal }, fetchNep);
-check("losse sensor in de lijst, thermostaat niet, geen kamer= zonder keuze", [true, false, false, true],
-  [metSensor.includes('"Sensor hal": 19.4'), metSensor.includes('"Woonkamer": 20.1'), metSensor.includes(";kamer="), metSensor.includes("KAMERSENSOR")]);
-const gekozen = await controle(SLEUTEL, { t1: thermostaat, s1: hal }, fetchNep, glob, "Sensor hal");
-check("gekozen kamersensor komt in het argument", [true, true], [gekozen.includes("<je sleutel>;Woonkamer;kamer=Sensor hal"), gekozen.includes("Alles in orde")]);
-const tikfout = await controle(SLEUTEL, { t1: thermostaat, s1: hal }, fetchNep, glob, "sensor hal");
-check("kamersensor met tikfout: FOUT, niet in het argument", [true, false, false],
-  [tikfout.includes('Kamersensor "sensor hal" niet gevonden'), tikfout.includes(";kamer="), tikfout.includes("Alles in orde")]);
+check("thermometer in de lijst, geen kamer= zonder keuze", [true, `${SLEUTEL};Woonkamer`],
+  [metSensor.includes('"Sensor hal": 19.4'), argumentRegel(metSensor)]);
+const alles = await controle(SLEUTEL, { t1: thermostaat, s1: hal }, fetchNep, { thermostaat: "Woonkamer", kamer: "Sensor hal", volg: true });
+check("alles ingevuld: volg en kamer= in het argument", `${SLEUTEL};Woonkamer;volg;kamer=Sensor hal`, argumentRegel(alles));
+check("het argument werkt in het script", { sleutel: SLEUTEL, thermostaat: "Woonkamer", volg: true, kamersensor: "Sensor hal" },
+  (({ sleutel, thermostaat: t, volg, kamersensor }) => ({ sleutel, thermostaat: t, volg, kamersensor }))(
+    (await laad()(Homey, fetchNep, glob, log)).leesInstellingen(argumentRegel(alles))));
+const tikfout = await controle(SLEUTEL, { t1: thermostaat, s1: hal }, fetchNep, { kamer: "sensor hal" });
+check("kamersensor met tikfout: FOUT, geen flowblok", [true, null], [tikfout.includes('Kamersensor "sensor hal" niet gevonden'), argumentRegel(tikfout)]);
 
 // Het script zelf met kamer=
 const HomeyMetSensor = { devices: { ...Homey.devices, getDevices: async () => ({ t1: thermostaat, s1: hal }) } };

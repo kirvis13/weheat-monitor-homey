@@ -23,29 +23,38 @@ Een HomeyScript dat je thermostaat in Homey koppelt aan [weheat-monitor.nl](http
 ## Installeren
 
 1. **Sleutel maken.** Ga naar [weheat-monitor.nl/settings/connections](https://www.weheat-monitor.nl/settings/connections), maak een nieuwe koppeling en kopieer de sleutel (`whm_` plus 64 tekens). Je ziet hem maar één keer.
-2. **Eerst controleren.** Open HomeyScript op [my.homey.app](https://my.homey.app), maak een script `weheat-monitor-controle`, plak [`controle.js`](controle.js) erin, zet je sleutel bovenin en druk op **Test**. Wil je een losse thermometer voor de kamer gebruiken, zet dan ook zijn naam bij `KAMERSENSOR` (zie [Hoe heet mijn thermostaat of sensor?](#hoe-heet-mijn-thermostaat-of-sensor)). Je ziet dan zoiets als:
+2. **Eerst controleren.** Open HomeyScript op [my.homey.app](https://my.homey.app), maak een script `weheat-monitor-controle` en plak [`controle.js`](controle.js) erin. Bovenin vul je in wat je weet:
+   ```js
+   const SLEUTEL = "whm_...";   // je sleutel uit stap 1
+   const THERMOSTAAT = "";      // de thermostaat die je warmtepomp aanstuurt (leeg = de enige die er is)
+   const KAMERSENSOR = "";      // optioneel: een losse thermometer die de kamer beter meet
+   const VOLG_PLAN = false;     // true: de thermostaat volgt het plan van de site
+   ```
+   Druk op **Test**. Weet je een naam nog niet, laat hem dan leeg: de uitvoer noemt alle thermostaten en thermometers in Homey. Kopieer de juiste naam, vul hem in en druk opnieuw op Test. Als alles klopt, zie je zoiets als:
    ```
    OK    Sleutel geaccepteerd door weheat-monitor.nl. Plan voor deze koppeling: uit.
    OK    Thermostaat "Toon" (nl.toonwater.toonwater): setpoint 17 °C, kamer 22.3 °C.
-
-   Temperatuursensoren (voor kamer= in het argument):
-         "Sensor hal": 19.4 °C
-         "Woonkamer sensor": 21.8 °C
-
    OK    Kamersensor "Woonkamer sensor": 21.8 °C.
    OK    HomeyScript kan de toestand bewaren.
 
-   Alles in orde. Zet dit als argument in de flow:
-   <je sleutel>;Toon;kamer=Woonkamer sensor
+   Thermostaten in Homey (voor THERMOSTAAT):
+         "Toon": setpoint 17 °C
+         "Werkkamer": setpoint 19 °C
+   Thermometers in Homey (voor KAMERSENSOR, optioneel):
+         "Sensor hal": 19.4 °C
+         "Woonkamer sensor": 21.8 °C
+
+   Alles in orde. Zo bouw je de flow:
+     Als       Datum en tijd: Elke 1 minuut
+     Dan       HomeyScript: Voer een script uit met argument
+     Script    weheat-monitor
+     Argument  whm_0123...;Toon;kamer=Woonkamer sensor
    ```
-   Staat er een `FOUT`, dan zegt die regel wat er mis is. Bewaar de regel na "Zet dit als argument in de flow" (met je eigen sleutel ervoor), die heb je in stap 4 nodig. Het controlescript verandert niets aan je thermostaat; daarna mag je het weggooien.
+   Staat er een `FOUT`, dan zegt die regel wat er mis is, en komt het flowblok pas als alles goed is. Het controlescript verandert niets aan je thermostaat. Bewaar het: draai het opnieuw als je later een andere thermostaat of thermometer wilt.
 3. **Script plakken.** Maak een tweede script met de naam `weheat-monitor` en plak de hele inhoud van [`weheat-monitor.js`](weheat-monitor.js) erin. Je hoeft er niets in aan te passen: je sleutel en thermostaat komen in de flow. Sla het op, maar druk hier **niet** op Test. Zonder argument meldt het script `Geen geldige sleutel`; dat is in deze stap normaal.
-4. **Flow maken.**
+4. **Flow maken.** Neem het flowblok uit stap 2 over:
    - **Als**: Datum en tijd, elke 1 minuut.
-   - **Dan**: HomeyScript, het script uitvoeren **met argument**. Kies `weheat-monitor` en zet als argument de regel uit stap 2: je sleutel, een puntkomma en de naam van je thermostaat zoals hij in Homey heet:
-     ```
-     whm_0123...;Toon
-     ```
+   - **Dan**: HomeyScript, "Voer een script uit met argument". Kies `weheat-monitor` en plak als argument de regel achter `Argument`.
 5. **Testen.** Test nu via de flow, niet in het script: druk in de flow op **Testen**. In de testtekst staat dan iets als `v0.2.1: plan volgen staat uit; wachtrij 0`. Op weheat-monitor.nl/settings/connections loopt "laatst gezien" mee.
 
 ## Het argument
@@ -65,7 +74,7 @@ Opties mogen samen: `whm_...;Toon;volg;kamer=Woonkamer sensor`. Een naam mag spa
 
 Het script zoekt apparaten op hun naam in Homey, precies zoals die er staat: hoofdletters en spaties tellen mee.
 
-- **Makkelijkst**: draai [`controle.js`](controle.js) (stap 2). Het noemt elke thermostaat (alles met een ingestelde temperatuur) en elke losse temperatuursensor bij naam, met de temperatuur die hij nu meet. Kopieer de naam van daaruit.
+- **Makkelijkst**: draai [`controle.js`](controle.js) (stap 2) met `THERMOSTAAT` en `KAMERSENSOR` leeg. Het noemt elke thermostaat (alles met een ingestelde temperatuur) en elke losse thermometer bij naam, met wat hij nu meet. Kopieer de naam van daaruit, vul hem in en druk opnieuw op Test.
 - **In de Homey-app**: Apparaten, tik op het apparaat, het tandwiel. Bovenaan staat de naam. Daar kun je hem ook veranderen in iets korts zonder rare tekens, bijvoorbeeld `Thermometer woonkamer`. Verander je de naam later, pas dan ook het argument in de flow aan.
 
 Als kamersensor werkt elk apparaat dat een temperatuur meet (`measure_temperature`): een Aqara-, Netatmo- of Shelly-thermometer, een bewegingsmelder met temperatuur, enzovoort. Hang hem waar je echt zit, niet in de zon of bij de radiator. Vindt het script de sensor niet, of geeft hij geen temperatuur, dan gebruikt het de kamertemperatuur van de thermostaat en zegt dat in de testtekst.
@@ -115,7 +124,7 @@ Draai eerst [`controle.js`](controle.js) (stap 2 hierboven): dat controleert sle
 | `fout: HTTP 401` of `weigert de sleutel` | De sleutel is ingetrokken of verkeerd. Maak een nieuwe koppeling |
 | `fout: geen verbinding` | Even geen internet of de site was niet bereikbaar. De metingen wachten en gaan later mee |
 
-Kom je er niet uit, open dan een [issue](https://github.com/kirvis13/weheat-monitor-homey/issues) en zet de testtekst of de uitvoer van `controle.js` erbij. Daar staat nooit je sleutel in.
+Kom je er niet uit, open dan een [issue](https://github.com/kirvis13/weheat-monitor-homey/issues) en zet de testtekst of de uitvoer van `controle.js` erbij. In de testtekst staat nooit je sleutel; haal bij de uitvoer van `controle.js` de regel `Argument` weg, want daar staat hij wel in.
 
 ## Verwijderen
 
@@ -127,7 +136,7 @@ global.set("weheat_monitor_toestand", null);
 
 ## Privacy
 
-De sleutel gaat alleen mee in de `Authorization: Bearer`-kop, komt nooit in een log of testtekst en staat alleen in je flow. Alleen wat onder "Wat er naar de site gaat" staat verlaat je huis, en alleen naar weheat-monitor.nl. Trek de sleutel in op de site om alles in één keer te stoppen.
+De sleutel gaat alleen mee in de `Authorization: Bearer`-kop, komt nooit in een log of testtekst en staat alleen in je flow en in het controlescript. Alleen wat onder "Wat er naar de site gaat" staat verlaat je huis, en alleen naar weheat-monitor.nl. Trek de sleutel in op de site om alles in één keer te stoppen.
 
 ## Ontwikkelen
 

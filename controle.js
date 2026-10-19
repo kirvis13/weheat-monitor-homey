@@ -1,14 +1,18 @@
 // Weheat Monitor voor Homey: controle vooraf
 // https://github.com/kirvis13/weheat-monitor-homey
 //
-// Draai dit één keer in een los HomeyScript, vóór je de flow maakt: vul je
-// sleutel hieronder in en druk op Test. Het controleert je sleutel bij
-// weheat-monitor.nl, zoekt je thermostaten en temperatuursensoren en geeft de
-// regel die je als argument in de flow zet. Het verandert niets aan je thermostaat; de site
-// ziet alleen dat de koppeling "gezien" is.
+// Draai dit in een los HomeyScript, vóór je de flow maakt: vul hieronder in wat
+// je weet en druk op Test. Het controleert je sleutel bij weheat-monitor.nl,
+// zoekt je thermostaten en temperatuursensoren en zet onderaan precies wat je
+// in de flow invult. Weet je een naam nog niet, laat hem leeg: de uitvoer
+// noemt alle namen, zodat je er een kunt kopiëren en opnieuw op Test drukt.
+// Het verandert niets aan je thermostaat; de site ziet alleen dat de koppeling
+// "gezien" is.
 
-const SLEUTEL = "whm_...";            // van weheat-monitor.nl/settings/connections
-const KAMERSENSOR = "";               // optioneel: naam van een losse temperatuursensor, zoals hieronder in de lijst
+const SLEUTEL = "whm_...";   // van weheat-monitor.nl/settings/connections
+const THERMOSTAAT = "";      // de thermostaat die je warmtepomp aanstuurt (leeg = de enige die er is)
+const KAMERSENSOR = "";      // optioneel: een losse thermometer die de kamer beter meet
+const VOLG_PLAN = false;     // true: de thermostaat volgt het plan van de site (en de thermostaattest)
 
 const ADRES = "https://www.weheat-monitor.nl/api/v1/devices/sync";
 const TIMEOUT_MS = 10_000;
@@ -39,11 +43,13 @@ async function vraag() {
   }
 }
 
+
 async function controle() {
   const regels = [];
   const goed = (t) => regels.push(`OK    ${t}`);
   const fout = (t) => regels.push(`FOUT  ${t}`);
   let alles = true;
+  const graden = (v) => (typeof v === "number" ? `${v} °C` : "onbekend");
 
   // 1. De sleutel
   const sleutel = SLEUTEL.trim();
@@ -63,44 +69,51 @@ async function controle() {
     }
   }
 
-  // 2. Thermostaten: alles met een ingestelde temperatuur
+  // 2. Wat er in Homey is: thermostaten (met een ingestelde temperatuur) en losse thermometers
   const apparaten = Object.values(await Homey.devices.getDevices());
-  const thermostaten = apparaten.filter((d) => d.capabilitiesObj?.target_temperature);
-  if (!thermostaten.length) {
-    fout("Geen thermostaat gevonden: geen enkel apparaat in Homey heeft een ingestelde temperatuur (target_temperature).");
-    alles = false;
-  } else {
-    for (const d of thermostaten) {
-      const sp = d.capabilitiesObj.target_temperature?.value;
-      const kamer = d.capabilitiesObj.measure_temperature?.value;
-      const app = /^homey:app:([^:]+):/.exec(d.driverId ?? d.driverUri ?? "")?.[1] ?? "onbekende app";
-      const waarden = sp == null ? "nog geen setpoint" : `setpoint ${sp} °C, kamer ${kamer ?? "onbekend"} °C`;
-      goed(`Thermostaat "${d.name}" (${app}): ${waarden}.`);
-    }
-  }
-
-  // 3. Losse temperatuursensoren, voor kamer= in het argument
+  const opNaam = (a, b) => String(a.name).localeCompare(String(b.name));
+  const thermostaten = apparaten.filter((d) => d.capabilitiesObj?.target_temperature).sort(opNaam);
   const sensoren = apparaten
     .filter((d) => d.capabilitiesObj?.measure_temperature && !d.capabilitiesObj?.target_temperature)
-    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  const kamersensor = KAMERSENSOR.trim();
-  if (sensoren.length) {
-    regels.push("");
-    regels.push("Temperatuursensoren (voor kamer= in het argument):");
-    for (const d of sensoren) regels.push(`      "${d.name}": ${d.capabilitiesObj.measure_temperature?.value ?? "onbekend"} °C`);
-    regels.push("");
+    .sort(opNaam);
+
+  // 3. De thermostaat
+  const gevraagd = THERMOSTAAT.trim();
+  let thermostaat = null;
+  if (gevraagd) {
+    thermostaat = apparaten.find((d) => d.name === gevraagd) ?? null;
+    if (!thermostaat) fout(`Thermostaat "${gevraagd}" niet gevonden. Neem de naam precies over uit de lijst hieronder.`);
+    else if (!thermostaat.capabilitiesObj?.target_temperature) {
+      fout(`"${gevraagd}" heeft geen ingestelde temperatuur (target_temperature), dus is geen thermostaat. Kies er een uit de lijst hieronder.`);
+      thermostaat = null;
+    }
+  } else if (thermostaten.length === 1) {
+    thermostaat = thermostaten[0];
+  } else if (thermostaten.length > 1) {
+    fout("Er zijn meerdere thermostaten. Zet bij THERMOSTAAT de naam van degene die je warmtepomp aanstuurt (zie de lijst hieronder).");
+  } else {
+    fout("Geen thermostaat gevonden: geen enkel apparaat in Homey heeft een ingestelde temperatuur (target_temperature).");
   }
-  let kamerOk = false;
-  if (kamersensor) {
-    const d = apparaten.find((x) => x.name === kamersensor);
+  if (thermostaat) {
+    const sp = thermostaat.capabilitiesObj.target_temperature?.value;
+    const app = /^homey:app:([^:]+):/.exec(thermostaat.driverId ?? thermostaat.driverUri ?? "")?.[1] ?? "onbekende app";
+    if (typeof sp !== "number") { fout(`Thermostaat "${thermostaat.name}" (${app}) geeft (nog) geen setpoint.`); thermostaat = null; }
+    else goed(`Thermostaat "${thermostaat.name}" (${app}): setpoint ${graden(sp)}, kamer ${graden(thermostaat.capabilitiesObj.measure_temperature?.value)}.`);
+  }
+  if (!thermostaat) alles = false;
+
+  // 4. De kamersensor (optioneel)
+  const kamer = KAMERSENSOR.trim();
+  if (kamer) {
+    const d = apparaten.find((x) => x.name === kamer);
     const t = d?.capabilitiesObj?.measure_temperature?.value;
-    if (!d) fout(`Kamersensor "${kamersensor}" niet gevonden. Neem de naam precies over uit de lijst hierboven.`);
-    else if (typeof t !== "number") fout(`Kamersensor "${kamersensor}" geeft (nog) geen temperatuur.`);
-    else { goed(`Kamersensor "${kamersensor}": ${t} °C.`); kamerOk = true; }
-    if (!kamerOk) alles = false;
+    if (!d) fout(`Kamersensor "${kamer}" niet gevonden. Neem de naam precies over uit de lijst hieronder.`);
+    else if (typeof t !== "number") fout(`Kamersensor "${kamer}" geeft (nog) geen temperatuur.`);
+    else goed(`Kamersensor "${kamer}": ${graden(t)}.`);
+    if (!d || typeof t !== "number") alles = false;
   }
 
-  // 4. Bewaren tussen twee runs
+  // 5. Bewaren tussen twee runs
   const proef = `controle-${Date.now()}`;
   try {
     global.set("weheat_monitor_controle", proef);
@@ -112,14 +125,31 @@ async function controle() {
     alles = false;
   }
 
-  // 5. De regel voor de flow
-  const naam = thermostaten.length === 1 ? thermostaten[0].name : "naam van je thermostaat";
+  // 6. Alle namen, om uit te kopiëren
+  regels.push("", "Thermostaten in Homey (voor THERMOSTAAT):");
+  for (const d of thermostaten) regels.push(`      "${d.name}": setpoint ${graden(d.capabilitiesObj.target_temperature?.value)}`);
+  if (!thermostaten.length) regels.push("      (geen)");
+  regels.push("Thermometers in Homey (voor KAMERSENSOR, optioneel):");
+  for (const d of sensoren) regels.push(`      "${d.name}": ${graden(d.capabilitiesObj.measure_temperature?.value)}`);
+  if (!sensoren.length) regels.push("      (geen)");
+
+  // 7. De flow
   regels.push("");
-  regels.push(alles ? "Alles in orde. Zet dit als argument in de flow:" : "Los eerst de FOUT-regels op. Daarna wordt het argument:");
-  regels.push(`<je sleutel>;${naam}${kamerOk ? `;kamer=${kamersensor}` : ""}`);
-  regels.push("(Je sleutel staat hier bewust niet in, zodat je deze tekst veilig kunt delen.)");
-  if (thermostaten.length > 1) regels.push("(Kies de naam van de thermostaat die je pomp aanstuurt, precies zoals hierboven.)");
-  if (!kamersensor && sensoren.length) regels.push("(Meet een sensor hierboven de kamer beter? Zet zijn naam bovenin bij KAMERSENSOR en druk opnieuw op Test.)");
+  if (!alles) {
+    regels.push("Los eerst de FOUT-regels op en druk opnieuw op Test. Dan staat hier wat je in de flow invult.");
+    return regels.join("\n");
+  }
+  const argument = [sleutel, thermostaat.name, ...(VOLG_PLAN ? ["volg"] : []), ...(kamer ? [`kamer=${kamer}`] : [])].join(";");
+  regels.push(
+    "Alles in orde. Zo bouw je de flow:",
+    "  Als       Datum en tijd: Elke 1 minuut",
+    "  Dan       HomeyScript: Voer een script uit met argument",
+    "  Script    weheat-monitor",
+    `  Argument  ${argument}`,
+    "",
+    `Plan volgen: ${VOLG_PLAN ? "aan (volg)" : "uit. Zet VOLG_PLAN op true als de site je thermostaat mag sturen"}.`,
+    "Let op: het argument bevat je sleutel. Deel de uitvoer niet zonder die regel weg te halen.",
+  );
   return regels.join("\n");
 }
 
