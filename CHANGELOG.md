@@ -2,6 +2,13 @@
 
 Versies volgen [Semantic Versioning](https://semver.org). De nieuwste versie staat bovenaan.
 
+## 0.4.0 (9 november 2026)
+
+- **Ruimtes.** Nieuwe optie `ruimtes=alle` of `ruimtes=Slaapkamer achter,Zolder`: de temperatuursensoren in die zones gaan elk als ruimte naar weheat-monitor.nl, met de zone als naam en de zone erboven als verdieping. Vocht, CO2 en luchtdruk van hetzelfde apparaat, of van de enige in dezelfde zone, gaan mee. Nooit een thermostaat of radiatorkraan, nooit buiten, hooguit 20.
+- Alleen nieuwe waarden, op het tijdstip dat de sensor veranderde; nooit een herhaling. Ruimtemetingen hebben een eigen wachtrij (24 uur, 3.000 metingen); een site die ruimtes nog niet kent, laat ze wachten in plaats van ze kwijt te raken.
+- Een ruimtesensor die twee uur geen nieuwe temperatuur geeft, staat één keer in de tijdlijn.
+- `controle.js` heeft bovenin `RUIMTES`, noemt alle temperatuursensoren per zone en laat zien wat er per ruimte meegaat.
+
 ## 0.3.0 (19 oktober 2026)
 
 - Het script meldt zich in de tijdlijn van Homey, alleen als er iets verandert: de eerste keer verbonden, een storing van een kwartier (een geweigerde sleutel meteen), weer verbonden na zo'n storing, en een thermostaat of kamersensor die niet gevonden wordt. Zo zie je na het testen van de flow dat het werkt.

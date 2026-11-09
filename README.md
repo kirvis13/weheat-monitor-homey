@@ -9,6 +9,7 @@ Een HomeyScript dat je thermostaat in Homey koppelt aan [weheat-monitor.nl](http
 
 - **Meten**: elke minuut de kamertemperatuur en het setpoint van je thermostaat, en welk type thermostaat het is (de Homey-app en de driver, nooit de naam).
 - **Plan volgen** (optioneel, staat uit): het setpoint van het blok dat nu geldt gaat naar de thermostaat, altijd tussen 12 en 24 °C. Zo werkt ook de thermostaattest van de site.
+- **Ruimtes** (optioneel): de temperatuursensoren in andere kamers, met vocht, CO2 en luchtdruk, elk als ruimte op de site. Alleen nieuwe waarden.
 - **Werkt bij een storing door**: metingen wachten tot 24 uur, het plan voor de komende 48 uur staat lokaal.
 - Praat alleen met weheat-monitor.nl, nooit met Weheat zelf.
 
@@ -29,6 +30,7 @@ Een HomeyScript dat je thermostaat in Homey koppelt aan [weheat-monitor.nl](http
    const THERMOSTAAT = "";      // de thermostaat die je warmtepomp aanstuurt (leeg = de enige die er is)
    const KAMERSENSOR = "";      // optioneel: een losse thermometer die de kamer beter meet
    const VOLG_PLAN = false;     // true: de thermostaat volgt het plan van de site
+   const RUIMTES = "";          // optioneel: "alle", of zones met komma's ("Slaapkamer achter,Zolder")
    ```
    Druk op **Test**. Weet je een naam nog niet, laat hem dan leeg: de uitvoer noemt alle thermostaten en thermometers in Homey. Kopieer de juiste naam, vul hem in en druk opnieuw op Test. Als alles klopt, zie je onder de knop zoiets als:
    ```
@@ -77,6 +79,7 @@ Het script schrijft alleen in de tijdlijn als er iets verandert, nooit elke minu
 | ✅ weer verbonden | Na zo'n storing, als de bewaarde metingen verstuurd zijn |
 | ❌ weigert de sleutel | Meteen, als de sleutel is ingetrokken of niet klopt |
 | ⚠️ thermostaat of kamersensor niet gevonden | Eén keer, als een naam in het argument niet (meer) klopt |
+| ⚠️ al twee uur geen nieuwe temperatuur van ... | Eén keer per sensor uit `ruimtes=`, als die twee uur stil is (lege batterij, buiten bereik) |
 
 ## Het argument
 
@@ -88,6 +91,8 @@ Het argument is je sleutel en de naam van je thermostaat, met puntkomma's ertuss
 | `whm_...;Toon;volg` | Ook het plan en de thermostaattest volgen (zie hieronder) |
 | `whm_...;Toon;kamer=Woonkamer sensor` | De kamertemperatuur uit een losse sensor, als die beter hangt dan de thermostaat |
 | `whm_...;Toon;tset=OTGW/target_temperature` | De gevraagde aanvoertemperatuur van een OpenTherm Gateway (`apparaat/capability`) |
+| `whm_...;Toon;ruimtes=alle` | Ook de temperatuursensoren in andere ruimtes (zie [Ruimtes](#ruimtes)) |
+| `whm_...;Toon;ruimtes=Slaapkamer achter,Zolder` | Alleen de sensoren in die zones |
 
 Opties mogen samen: `whm_...;Toon;volg;kamer=Woonkamer sensor`. Een naam mag spaties bevatten, maar moet precies zo heten als in Homey.
 
@@ -105,6 +110,27 @@ Als kamersensor werkt elk apparaat dat een temperatuur meet (`measure_temperatur
 ```js
 const d = Object.values(await Homey.devices.getDevices()).find((x) => x.name === "OTGW");
 return Object.keys(d.capabilitiesObj);
+```
+
+## Ruimtes
+
+Met `ruimtes=` gaan ook de temperatuursensoren in andere kamers naar de site, elk als een ruimte. Zo ziet de site of de slaapkamers op hun doel komen, en later hoe je huis per kamer afkoelt.
+
+- **Welke sensoren**: elk apparaat met een temperatuur (`measure_temperature`) in de zones die je noemt, of in alle zones met `ruimtes=alle`. Een zone telt ook voor de zones erin, dus `ruimtes=Eerste verdieping` neemt alle kamers op die verdieping mee. Hooguit 20.
+- **Nooit**: een thermostaat of radiatorkraan (alles met een ingestelde temperatuur; je thermostaat gaat al mee), en nooit buiten: niet in een zone Buiten, Tuin, Terras, Balkon (of Outside, Outdoor, Garden), en geen apparaat waarvan de naam met "Buiten" begint.
+- **Naam**: de zone, met de zone erboven als verdieping. Welke kamer het op de site echt is, het doel en of hij meetelt, stel je in op weheat-monitor.nl bij Instellingen, Koppelingen. Een nieuwe naam in Homey maakt geen nieuwe ruimte: de site herkent de sensor aan een hash van zijn id.
+- **Vocht, CO2 en luchtdruk**: van hetzelfde apparaat, anders van de enige sensor van die soort in dezelfde zone. Twee in de zone en geen op het apparaat: geen, want een verkeerde sensor is erger dan geen waarde. Luchtdruk geeft Homey in mbar; dat is gelijk aan hPa.
+- **Alleen nieuwe waarden**: een meting gaat mee als een van de waarden veranderde, met het tijdstip van die verandering. Nooit een herhaling.
+- **Stil**: geeft een sensor twee uur geen nieuwe temperatuur, dan staat dat één keer in de tijdlijn.
+- **Stoppen**: haal `ruimtes=` uit het argument. Wat nog wachtte, vervalt dan.
+
+`controle.js` laat per zone zien welke sensoren er zijn en, met `RUIMTES` ingevuld, precies wat er meegaat:
+
+```
+✅ Ruimtes: 3 sensoren gaan mee naar weheat-monitor.nl:
+    Kinderkamer (Eerste verdieping): 19.4 °C, 56 %  [Shelly H&T]
+    Slaapkamer achter (Eerste verdieping): 17.2 °C, 63 %, 640 ppm, 1013.2 hPa  [Aqara slaapkamer]
+    Woonkamer (Begane grond): 21.8 °C  [Woonkamer sensor]
 ```
 
 ## Plan volgen en de thermostaattest
@@ -125,6 +151,7 @@ Met `volg` in het argument mag de site het setpoint van je thermostaat zetten. H
 | Handmatig verzet | Bij de eerste meting na een wijziging die niet van het script kwam | Als het gebeurt |
 | Gevraagde aanvoertemperatuur | Alleen met `tset=` | Elke minuut |
 | Type thermostaat | De Homey-app en de driver, stap, minimum en maximum. Geen naam, geen id | Bij de start, na een wijziging en eens per dag |
+| Ruimtes (alleen met `ruimtes=`) | Per sensor: een sleutel (een hash van het id van het apparaat), de naam van de zone, de zone erboven, en een meting met temperatuur en, als die er is, vocht, CO2 (ppm) en luchtdruk (hPa), op het tijdstip dat de sensor veranderde | Een meting alleen als een waarde veranderde; naam en zone elke minuut |
 
 De sleutel gaat alleen mee in de `Authorization`-kop en komt nooit in een log, een foutmelding of de tijdlijn.
 
@@ -140,6 +167,7 @@ Draai eerst [`controle.js`](controle.js) (stap 2 hierboven): dat controleert sle
 |---|---|
 | `Geen geldige sleutel` | Het script draait zonder argument (bijvoorbeeld met Test in HomeyScript zelf), of de sleutel klopt niet. Test via de flow met argument, en kijk of de hele sleutel erin staat |
 | `thermostaat "..." niet gevonden` | De naam in het argument wijkt af van de naam in Homey. Let op spaties en hoofdletters |
+| `zone "..." uit ruimtes= niet gevonden` | De zone na `ruimtes=` heet anders in Homey. `controle.js` noemt alle zones met een temperatuursensor |
 | `kamersensor "..." niet gevonden` | De naam na `kamer=` wijkt af van de naam in Homey. Het script gebruikt zolang de kamertemperatuur van de thermostaat |
 | `"..." heeft geen ingestelde temperatuur` | Dat apparaat is geen thermostaat, of de app geeft de ingestelde temperatuur (nog) niet door |
 | `weigert de sleutel` | De sleutel is ingetrokken of verkeerd. Maak een nieuwe koppeling |
@@ -166,7 +194,7 @@ De sleutel gaat alleen mee in de `Authorization: Bearer`-kop, komt nooit in een 
 bun run test/script.test.ts
 ```
 
-De test draait het echte script en `controle.js` zoals HomeyScript dat doet (zonder `AbortController`, instellingen in `args[0]`), tegen een nagebootste Homey en server. Hij dekt de wachtrij, de blokkeuze, de vier-uurregel, de grens van 12 tot 24 °C en dat bij het type thermostaat nooit naam of id meegaat.
+De test draait het echte script en `controle.js` zoals HomeyScript dat doet (zonder `AbortController`, instellingen in `args[0]`), tegen een nagebootste Homey en server. Hij dekt de wachtrij, de blokkeuze, de vier-uurregel, de grens van 12 tot 24 °C, dat bij het type thermostaat nooit naam of id meegaat, en de ruimtes: welke sensoren, buiten, vocht en CO2 erbij, alleen nieuwe waarden, een site die `rooms` nog niet kent. Het blok dat de ruimtes kiest staat in beide scripts en moet gelijk blijven; de test bewaakt dat.
 
 Wil je helpen? Zie [CONTRIBUTING.md](CONTRIBUTING.md).
 
