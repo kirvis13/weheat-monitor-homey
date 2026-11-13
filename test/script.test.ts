@@ -9,6 +9,7 @@
  * Draai: bun run test/script.test.ts (vanuit de repo-root)
  */
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 let fouten = 0;
 function check(naam: string, verwacht: unknown, kreeg: unknown) {
@@ -27,7 +28,7 @@ check("script eindigt met de aanroep van hoofd()", true, bron.trimEnd().endsWith
 function laad(opties: { volg?: boolean; argument?: string | null; zonderKlok?: boolean } = {}) {
   const code = bron
     .replace("const TIMEOUT_MS = 10_000;", "const TIMEOUT_MS = 200;")
-    .replace(SLOT, "return { hoofd, handmatigVerzet, kiesBlok, leesInstellingen, meldingen };");
+    .replace(SLOT, "return { hoofd, handmatigVerzet, kiesBlok, leesInstellingen, meldingen, sha256Hex, kiesRuimtes, metgezellen, ruimtesVoorAanroep };");
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
   // Zoals in HomeyScript: geen AbortController. Met zonderKlok ook geen setTimeout.
   const f = new AsyncFunction("Homey", "fetch", "global", "log", "args", "AbortController", "setTimeout", "clearTimeout", code);
@@ -229,18 +230,20 @@ check("eerste run zonder geschiedenis is geen handmatig verzet", false, api.hand
 check("na een herstart: anders dan wat we schreven is handmatig", true, api.handmatigVerzet(null, 18, 21));
 check("blok zonder setpoint telt niet", null, api.kiesBlok([{ start: "2026-01-01T00:00:00Z", end: "2030-01-01T00:00:00Z" }], nu));
 check("instellingen: alleen sleutel en thermostaat",
-  { sleutel: "whm_x", thermostaat: "Toon", kamersensor: "", volg: false, tsetApparaat: "", tsetCapability: "" },
+  { sleutel: "whm_x", thermostaat: "Toon", kamersensor: "", volg: false, tsetApparaat: "", tsetCapability: "", ruimtes: null },
   api.leesInstellingen(" whm_x ; Toon "));
 check("instellingen: alle opties, naam met spatie, hoofdletters in de optie",
-  { sleutel: "whm_x", thermostaat: "Toon woonkamer", kamersensor: "Sensor hal", volg: true, tsetApparaat: "OT Gateway", tsetCapability: "target_temperature.boiler" },
+  { sleutel: "whm_x", thermostaat: "Toon woonkamer", kamersensor: "Sensor hal", volg: true, tsetApparaat: "OT Gateway", tsetCapability: "target_temperature.boiler", ruimtes: null },
   api.leesInstellingen("whm_x;Toon woonkamer;Volg;kamer=Sensor hal;tset=OT Gateway/target_temperature.boiler"));
 check("instellingen: leeg argument", "", api.leesInstellingen(undefined).sleutel);
+check("instellingen: ruimtes=alle, ruimtes=lijst, ruimtes= leeg", ["alle", ["Slaapkamer achter", "Zolder"], null],
+  ["whm_x;Toon;ruimtes=Alle", "whm_x;Toon;ruimtes= Slaapkamer achter , Zolder", "whm_x;Toon;ruimtes="].map((a) => api.leesInstellingen(a).ruimtes));
 
 // ─── 7. Controlescript ──────────────────────────────────────────────────────
 console.log("\n7. Controlescript (controle.js)");
 const controleBron = lees("controle.js");
 check("controle eindigt met de aanroep van controle()", true, controleBron.trimEnd().endsWith("return await controle();"));
-type Keuzes = { thermostaat?: string; kamer?: string; volg?: boolean };
+type Keuzes = { thermostaat?: string; kamer?: string; volg?: boolean; ruimtes?: string; zones?: Record<string, unknown> };
 let controleTerug = "";
 /** Draait controle.js en geeft wat het logt; wat het teruggeeft staat in controleTerug. */
 async function controle(sleutel: string, apparaten: Record<string, unknown>, fe: unknown, k: Keuzes = {}, g: unknown = glob) {
@@ -248,15 +251,17 @@ async function controle(sleutel: string, apparaten: Record<string, unknown>, fe:
     .replace('const THERMOSTAAT = "";', `const THERMOSTAAT = ${JSON.stringify(k.thermostaat ?? "")};`)
     .replace('const KAMERSENSOR = "";', `const KAMERSENSOR = ${JSON.stringify(k.kamer ?? "")};`)
     .replace("const VOLG_PLAN = false;", `const VOLG_PLAN = ${k.volg ?? false};`)
+    .replace('const RUIMTES = "";', `const RUIMTES = ${JSON.stringify(k.ruimtes ?? "")};`)
     .replace("const TIMEOUT_MS = 10_000;", "const TIMEOUT_MS = 200;");
   const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
   const f = new AsyncFunction("Homey", "fetch", "global", "AbortController", "log", code);
   const gelogd: string[] = [];
-  controleTerug = await f({ flow: Homey.flow, devices: { getDevices: async () => apparaten } }, fe, g, undefined, (x: string) => gelogd.push(x));
+  controleTerug = await f({ flow: Homey.flow, devices: { getDevices: async () => apparaten }, zones: { getZones: async () => k.zones ?? {} } },
+    fe, g, undefined, (x: string) => gelogd.push(x));
   return gelogd.join("\n");
 }
 const argumentRegel = (uit: string) => /Argument: kopieer de regel hieronder\n\n(.*)$/m.exec(uit)?.[1] ?? null;
-for (const naam of ["THERMOSTAAT", "KAMERSENSOR", "VOLG_PLAN"]) {
+for (const naam of ["THERMOSTAAT", "KAMERSENSOR", "VOLG_PLAN", "RUIMTES"]) {
   check(`controle heeft ${naam} bovenin`, true, new RegExp(`^const ${naam} = `, "m").test(controleBron));
 }
 antwoord = { status: 200, data: { plan_live: false, base_setpoint: 20, blocks: [] } };
@@ -362,6 +367,158 @@ console.log("\n8. Meldingen in de Homey-tijdlijn");
   nu += MIN;
   const tekst = await (await laad()(zonderTijdlijn, fetchNep, glob, log)).hoofd();
   check("tijdlijn faalt: script loopt gewoon door", true, tekst.startsWith("v"));
+}
+
+
+// ─── 9. Ruimtes ─────────────────────────────────────────────────────────────
+console.log("\n9. Ruimtes (ruimtes=)");
+{
+  const blokVan = (t: string) => t.slice(t.indexOf("// ─── Ruimtes kiezen:"), t.indexOf("// ─── einde ruimtes kiezen ───"));
+  check("ruimtes kiezen: blok in weheat-monitor.js en controle.js gelijk", true,
+    blokVan(bron).length > 500 && blokVan(bron) === blokVan(lees("controle.js")));
+  const api = await laad()(Homey, fetchNep, glob, log);
+  const teksten = ["", "abc", "device-1f0e2d3c", "Zolder ° €", "x".repeat(55), "y".repeat(56), "z".repeat(64), "w".repeat(130)];
+  check("sha256 zonder imports gelijk aan die van Node", teksten.map((t) => createHash("sha256").update(t).digest("hex")),
+    teksten.map((t) => api.sha256Hex(t)));
+
+  const zones = {
+    huis: { id: "huis", name: "Thuis", parent: null },
+    bg: { id: "bg", name: "Begane grond", parent: "huis" },
+    v1: { id: "v1", name: "Eerste verdieping", parent: "huis" },
+    woon: { id: "woon", name: "Woonkamer", parent: "bg" },
+    keuken: { id: "keuken", name: "Keuken", parent: "bg" },
+    slaap: { id: "slaap", name: "Slaapkamer achter", parent: "v1" },
+    zolder: { id: "zolder", name: "Zolder", parent: "huis" },
+    tuin: { id: "tuin", name: "Tuin", parent: "huis" },
+  };
+  const LU = "2026-11-09T07:41:12.345Z";
+  const cap = (value: number, lastUpdated: string | undefined = LU) => ({ value, lastUpdated });
+  const ruimteApparaten: Record<string, any> = {
+    t1: { ...thermostaat, zone: "woon" },
+    aqara: { id: "aqara", name: "Aqara slaap", zone: "slaap", capabilitiesObj: { measure_temperature: cap(17.2), measure_humidity: cap(63), measure_battery: cap(80) } },
+    co2: { id: "co2", name: "CO2-meter", zone: "slaap", capabilitiesObj: { measure_co2: cap(640, "2026-11-09T07:44:58.000Z") } },
+    keuken: { id: "keuken", name: "Keuken temperatuur", zone: "keuken", capabilitiesObj: { measure_temperature: cap(20.9), measure_pressure: cap(1013.2) } },
+    vocht1: { id: "vocht1", name: "Vocht 1", zone: "keuken", capabilitiesObj: { measure_humidity: cap(55) } },
+    vocht2: { id: "vocht2", name: "Vocht 2", zone: "keuken", capabilitiesObj: { measure_humidity: cap(58) } },
+    tuin: { id: "tuin", name: "Weerstation", zone: "tuin", capabilitiesObj: { measure_temperature: cap(6.1) } },
+    buitenwoon: { id: "buitenwoon", name: "Buitensensor", zone: "woon", capabilitiesObj: { measure_temperature: cap(6.3) } },
+    zolder: { id: "zolder", name: "Zolder sensor", zone: "zolder", capabilitiesObj: { measure_temperature: cap(15.0) } },
+    kraan: { id: "kraan", name: "Radiatorkraan zolder", zone: "zolder", capabilitiesObj: { measure_temperature: cap(19), target_temperature: { value: 18 } } },
+  };
+  const lijst = Object.values(ruimteApparaten);
+  const alle = api.kiesRuimtes(lijst, zones, "alle");
+  check("alle: alleen temperatuursensoren, geen thermostaat of radiatorkraan, gesorteerd op zone",
+    [["Keuken", "Begane grond"], ["Slaapkamer achter", "Eerste verdieping"], ["Zolder", null]],
+    alle.ruimtes.map((r: any) => [r.naam, r.verdieping]));
+  check("buiten gaat nooit mee: zone Tuin, en een buitensensor in de woonkamer", ["Buitensensor", "Weerstation"],
+    alle.buiten.map((r: any) => r.apparaatNaam).sort());
+  check("een verdieping als zone neemt de zones erin mee", ["Slaapkamer achter"],
+    api.kiesRuimtes(lijst, zones, ["eerste  verdieping"]).ruimtes.map((r: any) => r.naam));
+  const tik = api.kiesRuimtes(lijst, zones, ["Zolder", "Garage"]);
+  check("onbekende zone gemeld, de rest gaat mee", [["Garage"], ["Zolder"]], [tik.onbekend, tik.ruimtes.map((r: any) => r.naam)]);
+  check("zonder zones van Homey: naam van het apparaat zonder 'temperatuur'", ["Keuken"],
+    api.kiesRuimtes([{ id: "k", name: "Keuken temperatuur", capabilitiesObj: { measure_temperature: cap(20) } }], {}, "alle").ruimtes.map((r: any) => r.naam));
+  const veel = Array.from({ length: 25 }, (_, i) => ({ id: `s${i}`, name: `S${i}`, zone: "zolder", capabilitiesObj: { measure_temperature: cap(18) } }));
+  const teVeel = api.kiesRuimtes(veel, zones, "alle");
+  check("hooguit 20, de rest geteld", [20, 5], [teVeel.ruimtes.length, teVeel.teVeel]);
+  const slaap = alle.ruimtes.find((r: any) => r.naam === "Slaapkamer achter");
+  const keuken = alle.ruimtes.find((r: any) => r.naam === "Keuken");
+  const ids = (g: Record<string, any>) => Object.fromEntries(Object.entries(g).map(([k, d]) => [k, d.id]));
+  check("vocht van het apparaat zelf, CO2 van de enige meter in de zone", { humidity: "aqara", co2: "co2" }, ids(api.metgezellen(slaap, lijst)));
+  check("twee vochtmeters in de zone: geen vocht; luchtdruk van het apparaat", { pressure: "keuken" }, ids(api.metgezellen(keuken, lijst)));
+
+  // Het script zelf
+  const HomeyRuimtes = { flow: Homey.flow, zones: { getZones: async () => zones },
+    devices: { getDevices: async () => ruimteApparaten, setCapabilityValue: async () => {} } };
+  const metRuimtes = (arg = ";ruimtes=alle") => laad({ argument: `${SLEUTEL};Woonkamer${arg}` })(HomeyRuimtes, fetchNep, glob, log).then((a: any) => a.hoofd());
+  opslag.delete("weheat_monitor_toestand");
+  const sleutelVan = (id: string) => createHash("sha256").update(id).digest("hex").slice(0, 16);
+  antwoord = { status: 200, data: { stored: 1, plan_live: false, base_setpoint: 20, blocks: [], rooms: { stored: 3, duplicates: 0, skipped: 0 } } };
+  nu = Date.parse("2026-11-09T08:00:20Z");
+  const eersteTekst = await metRuimtes();
+  const rooms = verzonden.at(-1)!.body.rooms;
+  check("rooms: key is sha256 van het apparaat-id, naam en verdieping van de zone",
+    [[sleutelVan("keuken"), "Keuken", "Begane grond"], [sleutelVan("aqara"), "Slaapkamer achter", "Eerste verdieping"], [sleutelVan("zolder"), "Zolder", undefined]],
+    rooms.map((r: any) => [r.key, r.name, r.floor]));
+  check("meting met het tijdstip van de nieuwste waarde (ms), vocht en CO2 erbij",
+    [{ measured_at: "2026-11-09T07:44:58.000Z", temp: 17.2, humidity: 63, co2: 640 }], rooms[1].readings);
+  check("luchtdruk in hPa (Homey geeft mbar)", 1013.2, rooms[0].readings[0].pressure);
+  check("geen naam, zone of id van een apparaat in de aanroep", false,
+    /Aqara|Weerstation|"aqara"|"slaap"/.test(JSON.stringify(verzonden.at(-1)!.body)));
+  check("wachtrij leeg; de testtekst noemt de ruimtes", [0, true], [toestand().ruimte_wachtrij.length, eersteTekst.includes("ruimtes 3 van 3 meten")]);
+
+  nu += MIN;
+  await metRuimtes();
+  check("niets veranderd: elke sensor gaat mee (naam), zonder metingen", [3, 0],
+    [verzonden.at(-1)!.body.rooms.length, verzonden.at(-1)!.body.rooms.flatMap((r: any) => r.readings).length]);
+  ruimteApparaten.aqara.capabilitiesObj.measure_humidity = cap(65, "2026-11-09T08:00:30.000Z");
+  nu += MIN;
+  await metRuimtes();
+  check("alleen het vocht veranderde: één nieuwe meting op dat tijdstip",
+    [{ measured_at: "2026-11-09T08:00:30.000Z", temp: 17.2, humidity: 65, co2: 640 }], verzonden.at(-1)!.body.rooms[1].readings);
+
+  antwoord = { status: 200, data: { stored: 1, plan_live: false, base_setpoint: 20, blocks: [] } };
+  ruimteApparaten.zolder.capabilitiesObj.measure_temperature = cap(15.5, "2026-11-09T08:02:05.000Z");
+  nu += MIN;
+  const ouder = await metRuimtes();
+  check("site zonder rooms: meting blijft wachten, en de testtekst zegt het", [1, true],
+    [toestand().ruimte_wachtrij.length, ouder.includes("site kent ruimtes nog niet")]);
+  antwoord = { status: 200, data: { stored: 1, plan_live: false, base_setpoint: 20, blocks: [], rooms: { stored: 1, duplicates: 0, skipped: 0 } } };
+  nu += MIN;
+  await metRuimtes();
+  check("daarna gaat hij alsnog mee", [0, 1], [toestand().ruimte_wachtrij.length, verzonden.at(-1)!.body.rooms[2].readings.length]);
+
+  const voorStil = tijdlijn.length;
+  nu = Date.parse("2026-11-09T10:03:00Z");
+  ruimteApparaten.keuken.capabilitiesObj.measure_temperature = cap(21, "2026-11-09T10:02:00.000Z");
+  ruimteApparaten.aqara.capabilitiesObj.measure_temperature = cap(17.3, "2026-11-09T10:01:00.000Z");
+  await metRuimtes();
+  nu += MIN;
+  await metRuimtes();
+  const stil = tijdlijn.slice(voorStil);
+  check("zolder twee uur stil: één melding in de tijdlijn, met naam en zone", [1, true],
+    [stil.length, stil[0]?.includes('"Zolder sensor" (Zolder)')]);
+
+  antwoord = { status: 503, data: null };
+  ruimteApparaten.keuken.capabilitiesObj.measure_temperature = cap(21.2, "2026-11-09T10:04:30.000Z");
+  nu += MIN;
+  await metRuimtes();
+  check("storing: de ruimtemeting wacht", 1, toestand().ruimte_wachtrij.length);
+  antwoord = { status: 200, data: { stored: 1, plan_live: false, base_setpoint: 20, blocks: [], rooms: { stored: 0, duplicates: 0, skipped: 0 } } };
+  nu += 20 * MIN;
+  await metRuimtes("");
+  check("ruimtes= weggehaald: geen rooms in de aanroep, wachtrij leeg", [false, 0],
+    ["rooms" in verzonden.at(-1)!.body, toestand().ruimte_wachtrij.length]);
+
+  opslag.delete("weheat_monitor_toestand");
+  const zonderTijd: Record<string, any> = { t1: { ...thermostaat, zone: "woon" },
+    h: { id: "h", name: "Hal", zone: "woon", capabilitiesObj: { measure_temperature: { value: 19 } } } };
+  const HomeyZonderTijd = { ...HomeyRuimtes, devices: { ...HomeyRuimtes.devices, getDevices: async () => zonderTijd } };
+  const tel = () => verzonden.at(-1)!.body.rooms[0].readings.length;
+  const zt = () => laad({ argument: `${SLEUTEL};Woonkamer;ruimtes=alle` })(HomeyZonderTijd, fetchNep, glob, log).then((a: any) => a.hoofd());
+  nu += MIN; await zt(); const a1 = tel();
+  nu += MIN; await zt(); const a2 = tel();
+  zonderTijd.h.capabilitiesObj.measure_temperature = { value: 19.5 };
+  nu += MIN; await zt(); const a3 = tel();
+  check("zonder lastUpdated: eerste waarde, dan niets, dan de nieuwe waarde", [1, 0, 1], [a1, a2, a3]);
+
+  const meta = [{ key: "k1aaaaaaaaaaaaaa", naam: "A", verdieping: null }];
+  const rij = Array.from({ length: 150 }, (_, i) => ({ key: "k1aaaaaaaaaaaaaa", measured_at: new Date(nu - (150 - i) * MIN).toISOString(), temp: 18 }));
+  const [payload, genomen] = api.ruimtesVoorAanroep(meta, rij);
+  check("ruimtesVoorAanroep: 100 van 150, oudste eerst, zonder key in de meting", [100, rij[0].measured_at, false],
+    [genomen, payload[0].readings[0].measured_at, "key" in payload[0].readings[0]]);
+
+  antwoord = { status: 200, data: { plan_live: false, base_setpoint: 20, blocks: [] } };
+  const cAlle = await controle(SLEUTEL, ruimteApparaten, fetchNep, { thermostaat: "Woonkamer", ruimtes: "alle", zones });
+  check("controle: ruimtes=alle in het argument, overzicht per ruimte, buiten genoemd",
+    [`${SLEUTEL};Woonkamer;ruimtes=alle`, true, true, true],
+    [argumentRegel(cAlle), cAlle.includes("3 sensoren gaan mee"), /Slaapkamer achter \(Eerste verdieping\): 17\.3 °C, 65 %, 640 ppm/.test(cAlle),
+      cAlle.includes('"Weerstation" buiten, gaat nooit mee')]);
+  const cTik = await controle(SLEUTEL, ruimteApparaten, fetchNep, { ruimtes: "Zolder,Garage", zones });
+  check("controle: onbekende zone is een FOUT, geen flowblok", [true, null], [cTik.includes('zone "Garage" niet gevonden'), argumentRegel(cTik)]);
+  const cLeeg = await controle(SLEUTEL, ruimteApparaten, fetchNep, { thermostaat: "Woonkamer", zones });
+  check("controle zonder RUIMTES: lijst per zone, niets in het argument", [true, `${SLEUTEL};Woonkamer`],
+    [cLeeg.includes('"Keuken": "Keuken temperatuur" 21.2 °C, 1013.2 hPa'), argumentRegel(cLeeg)]);
 }
 
 Date.now = echteNu;
